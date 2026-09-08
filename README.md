@@ -39,9 +39,7 @@ And there is always a gap between the current LLMs and the applications you use.
 
 
 
-Say you want to make an entire token and deploy it on-chain, write a complex contract that does something big you have in mind. You can always use ChatGPT or its competitors, but it's truly a deep hassle for a beginner and time consuming for the normal person. Hallucinations, outdated data, etc. All of that will stop you before long.
-
-
+Say you want to make an entire token and deploy it on-chain, write a complex contract that does something big you have in mind. You can always use ChatGPT or its competitors, but it's truly a deep hassle for a beginner and time consuming for the normal person. Hallucinations, outdated data, etc. All of that will stop you before long. important to mention, ACP.ai narrows this risk rather than claiming to eliminate it: user-enabled skills constrain what patterns the model draws on when generating a contract, and every deployment — template or custom — passes through a mandatory confirmation card before anything is signed.
 
 Or maybe you just want to automate something. Set up conditional actions. Say you wanted to, for instance, every Saturday, swap a specific token and instantly send it to an address. Or if you spend too much of something, you wanna get reminded you are spending too much.
 With our application, you can set all that up in mere seconds. You're in control of everything.
@@ -66,8 +64,8 @@ ACP.ai wires the whole protocol into your actions, automatically. With certifica
 - **Cross-chain escrow & contract deployment** - In-house Solidity ASC contracts (Deployable via the Agent) and Agent-driven deployment
 - **Payments, recurring & automation** - Send tokens to addresses, swap assets, Automate actions
 - **Multi-Chain integration** - Our application allows for actions across multiple chains
-- **Closed 24-tool registry** - a fixed set of 24 vetted actions the agent can call, each with per-tool Zod schemas, JSON Schema for the model, and risk classes, etc
-- **Skills** - 11 built-in skills. With the ability to add more for the agent.
+- **Closed 28-tool registry** - a fixed set of 28 vetted actions the agent can call, each with per-tool Zod schemas, JSON Schema for the model, and risk classes, etc
+- **Skills** - 11 built-in skills. With the ability to add more for the agent yourself.
 - **Prioritized Security** - All data is local. No telemetry, no auth-service and no built-in provider. (For now)
 - **BYOK** - You can bring your own api keys and use our service purely locally
 - **Desktop and Mobile** - You can use our app on different devices
@@ -533,6 +531,12 @@ four files at test time. ~1,090 keys, fully translated.
    instructions when unset.
 6. **Action log**: every attempt is recorded with proof refs; `/payments`
    surfaces the log as the audit trail.
+7. **Custom contract generation**: LLM-authored contracts carry residual
+   hallucination risk that vetted templates don't. ACP.ai mitigates this
+   with user-enabled skills that constrain generation patterns, but does
+   not currently run automated static analysis (reentrancy, access
+   control, overflow checks) before deployment. The confirmation card is
+   the final human checkpoint before signing.
 
 </details>
 
