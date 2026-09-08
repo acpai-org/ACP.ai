@@ -1,0 +1,57 @@
+{
+  "name": "acp-ai",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "MALLOC_ARENA_MAX=2 NODE_OPTIONS=--max_old_space_size=2048 next dev --turbopack -p 3000 2>&1 | tee dev.log",
+    "build": "MALLOC_ARENA_MAX=2 NODE_OPTIONS=--max_old_space_size=2560 next build --turbopack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "db:push": "echo \"db schema is applied at runtime by src/db/index.ts ensureDb() — nothing to push\"",
+    "test": "node --import tsx --test src/tests/*.test.mts"
+  },
+  "dependencies": {
+    "@gluwa/usc-sdk": "^0.18.0",
+    "@openzeppelin/contracts": "5.4.0",
+    "@reown/appkit": "^1.8.21",
+    "@reown/appkit-adapter-wagmi": "^1.8.21",
+    "@tanstack/react-query": "^5.101.2",
+    "@web3icons/react": "^4.1.21",
+    "better-sqlite3": "13.0.3",
+    "canvas-confetti": "^1.9.4",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
+    "ethers": "^6.17.0",
+    "lucide-react": "^1.22.0",
+    "motion": "^12.42.2",
+    "next": "^16.3.0-canary.73",
+    "qrcode-generator": "^2.0.4",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "solc": "^0.8.36",
+    "tailwind-merge": "^3.6.0",
+    "viem": "^2.53.1",
+    "wagmi": "^3.6.21",
+    "zod": "^3.25.76",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "eslint": "^9",
+    "eslint-config-next": "^16.3.0-canary.73",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.13",
+    "typescript": "^5"
+  },
+  "trustedDependencies": [
+    "@reown/appkit",
+    "better-sqlite3"
+  ]
+}
