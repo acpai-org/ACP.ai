@@ -26,8 +26,8 @@
 
 
 > [!NOTE]
-> Demo video/links are in progress and will be published soon.
-> 
+> The demo video will be ready in a few days. For now, the project is deployed on web in beta form.
+> Link URL (beta): https://acp-ai.netlify.app
 
 
 # ACP.ai
