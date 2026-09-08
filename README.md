@@ -55,7 +55,7 @@ And that raises another problem. What if you want to prove what you did? Not a s
 A transaction hash is not proof. It's like a pointer - a promise that if you go look, you *might* just find something. Screenshots can be faked, databases can be edited. Basically, it is not a proof.
 
 
-Attestcoin solves this properly. It is a protocol on Creditcoin that produces attestations - cryptographic evidence; Merkle proofs plus continuity proofs, proving that your transaction on the source chain really happened and really succeeded. And importantly, the verification doesn't run on our servers at all. It runs on the Creditcoin chain itself, a **decentralized** financial infrastructure that enhances trust through secure and transparent credit transactions. It utilizes blockchain technology to record these transactions, ensuring integrity and transparency. No one can forge or revoke it. 
+Attestcoin solves this properly. It is a protocol on Creditcoin that produces attestations - cryptographic evidence; Merkle proofs plus continuity proofs, proving that your transaction on the source chain really happened and really succeeded. And importantly, the verification doesn't run on our servers at all. It runs on the Creditcoin chain's hosted Proof Builder itself, a **decentralized** financial infrastructure that enhances trust through secure and transparent credit transactions. It utilizes blockchain technology to record these transactions, ensuring integrity and transparency. No one can forge or revoke it. 
 
 
 ACP.ai wires the whole protocol into your actions, automatically. With certificates that anyone can verify (Export any verified payment as a certificate or QR code). 
@@ -79,9 +79,10 @@ ACP.ai wires the whole protocol into your actions, automatically. With certifica
 
 what this app will never do:
 
-- No move without signature
-- Everything happens locally
-- Keys never leave browser/server
+- Nothing moves without signature.
+- Deployable locally without using a third-party service.
+- API Keys never leave browser/server.
+- Agent-driven contract deployment is only allowed on testnet by default. You have to override this to deploy on mainnet.
 
 
 ## Screenshots
