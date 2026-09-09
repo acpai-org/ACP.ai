@@ -30,7 +30,7 @@
 > Link URL (beta): https://acp-ai.netlify.app
 
 
-# ACP.ai
+# ACP.ai - Attested Credit Protocol
 This project was built with the goal of simplifying the world of web2/web3 for crypto enthusiasts. Doesn't matter if you are a complete beginner, know some stuff about crypto or are an advanced professional; this project is for anyone who is brave enough to step into the world of crypto.
 
 
