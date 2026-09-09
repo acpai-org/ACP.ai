@@ -34,9 +34,9 @@
 
 > [!NOTE]
 > The demo video will be ready in a few days. For now, the project is deployed on web in beta form.
-> Link URL (beta): https://acp-ai.netlify.app
-> The submitted track is the AI Track.
-
+> Link URL (beta): https://acp-ai.netlify.app<br>
+> The Track tracks for this project are the DeFi/AI Track.<br>
+> Low commits are because local commits have been excluded.
 
 # ACP.ai - Attested Credit Protocol
 This project was built with the goal of simplifying the world of web2/web3 for crypto enthusiasts. Doesn't matter if you are a complete beginner, know some stuff about crypto or are an advanced professional; this project is for anyone who is brave enough to step into the world of crypto.
