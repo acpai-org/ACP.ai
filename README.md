@@ -18,12 +18,18 @@
 </div>
 
 ## Table of Contents
-- [ACP.ai](#acpai)
+- [ACP.ai](#acpai---attested-credit-protocol)
+  - [Why Attestcoin](#but-why-attestcoin)
+  - [What the agent does](#what-the-agent-does-with-attestcoin)
+  - [Protocol surface coverage](#protocol-surface-coverage)
+  - [The end-to-end flow](#the-end-to-end-flow-payment--proof--certificate--release)
 - [Features](#features)
 - [Screenshots](#screenshots)
 - [Supported Chains](#supported-chains)
 - [Installation](#installation)
 - [Full Architecture](#full-architecture)
+- [Protocol correctness](#protocol-correctness-details-the-things-that-bite-if-you-skip-them)
+- [Scope & roadmap](#scope--roadmap)
 
 
 > [!NOTE]
@@ -145,7 +151,7 @@ contract → off-chain worker → Proof Builder → ASC → precompile — with 
 orchestrating steps a human would otherwise do manually.)*
 
 ## Features
-## Features
+
 
 - **Attestcoin-native agent** — 11 of the 28 closed-registry tools are Attestcoin tools
   (attestation status, wait-for-attestation, decode, verify, estimate cost, submit proof,
@@ -654,6 +660,10 @@ four files at test time. ~1,090 keys, fully translated.
    the final human checkpoint before signing.
 
 
+</details>
+
+
+
 ### Protocol correctness details (the things that bite if you skip them)
 
 - **Receipt status**: the Block Prover Precompile validates inclusion, not execution.
@@ -691,7 +701,3 @@ four files at test time. ~1,090 keys, fully translated.
   analysis (reentrancy / access control) runs before deployment yet.
 - The demo runs on CC3 testnet against live protocol endpoints; mainnet deploy of agent
   contracts is behind an opt-in policy flag (off by default).
-</details>
-
-
-
