@@ -1,0 +1,54 @@
+---
+name: examples-devnet
+
+"on":
+  pull_request:
+  schedule:
+    # at 9:20, every Thursday
+    - cron: "20 9 * * 4"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  hello-bridge:
+    uses: ./.github/workflows/hello-bridge.yml
+    with:
+      source_chain_kind: "sepolia"
+      asc_kind: "devnet"
+    secrets: inherit
+
+  custom-contracts-bridging:
+    # chain examples b/c they use the same wallet and we get
+    # replacement transaction underpriced and/or nonce errors
+    needs: hello-bridge
+    uses: ./.github/workflows/custom-contracts-bridging.yml
+    with:
+      source_chain_kind: "sepolia"
+      asc_kind: "devnet"
+    secrets: inherit
+
+  bridge-offchain-worker:
+    # chain examples b/c they use the same wallet and we get
+    # replacement transaction underpriced and/or nonce errors
+    needs: custom-contracts-bridging
+    uses: ./.github/workflows/bridge-offchain-worker.yml
+    with:
+      source_chain_kind: "sepolia"
+      asc_kind: "devnet"
+    secrets: inherit
+
+  loan-flow:
+    if: false
+    # chain examples b/c they use the same wallet and we get
+    # replacement transaction underpriced and/or nonce errors
+    needs: bridge-offchain-worker
+    uses: ./.github/workflows/loan-flow.yml
+    with:
+      source_chain_kind: "sepolia"
+      asc_kind: "devnet"
+    secrets: inherit

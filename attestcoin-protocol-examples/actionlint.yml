@@ -1,0 +1,11 @@
+---
+self-hosted-runner:
+  labels:
+    # ubuntu-26.04 is a valid hosted runner image but not yet in actionlint's
+    # built-in label list; whitelist it here so the runner-label check passes.
+    - ubuntu-26.04
+paths:
+  .github/workflows/*.yml:
+    ignore:
+      - 'shellcheck reported issue in this script: SC2129:.+'
+      - 'constant expression "false" in condition. remove the if: section.*'

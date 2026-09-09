@@ -1,0 +1,41 @@
+{
+  "license": "MIT",
+  "name": "asc-testnet-bridge-examples",
+  "version": "0.2.0",
+  "scripts": {
+    "hello_bridge:submit_query": "tsx hello-bridge/submit_query.ts",
+    "custom_bridge:submit_query": "tsx custom-contracts-bridging/submit_query.ts",
+    "offchain:start_worker": "tsx bridge-offchain-worker/worker.ts",
+    "loan_flow:authorize_token": "tsx loan-flow/authorize.ts",
+    "loan_flow:register_source_contract": "tsx loan-flow/register_source_contract.ts",
+    "loan_flow:register_loan": "tsx loan-flow/register.ts",
+    "loan_flow:fund_loan": "tsx loan-flow/fund_loan.ts",
+    "loan_flow:repay_loan": "tsx loan-flow/repay_loan.ts",
+    "loan_flow:inspect_loan": "tsx loan-flow/inspect.ts",
+    "loan_flow:start_worker": "tsx loan-flow/worker.ts",
+    "utils:check_balance": "node utils/check_balance.js",
+    "check-format": "prettier --check .",
+    "eslint": "eslint -c .eslintrc.js --ignore-pattern .eslintrc.js --ignore-pattern check_balance.js --max-warnings 0 --ext .ts --ext .js .",
+    "format": "prettier --write .",
+    "build": "forge build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "8.62.1",
+    "@typescript-eslint/parser": "8.62.1",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.4",
+    "typescript": "6.0.2",
+    "tsx": "^4.22.4"
+  },
+  "dependencies": {
+    "@gluwa/usc-contracts": "0.1.2",
+    "@gluwa/usc-sdk": "0.18.0",
+    "@openzeppelin/contracts": "5.4.0",
+    "@types/node": "26.1.0",
+    "dotenv": "17.4.2",
+    "ethers": "^6.17.0"
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
+}

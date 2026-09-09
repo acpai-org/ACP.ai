@@ -1,0 +1,48 @@
+---
+name: examples
+
+"on":
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-creditcoin3.yml
+    with:
+      build-options: "--release --features=fast-runtime"
+      version-string: testing-ci
+    secrets: inherit
+
+  hello-bridge:
+    needs: build
+    uses: ./.github/workflows/hello-bridge.yml
+    with:
+      source_chain_kind: "anvil"
+      asc_kind: "local"
+
+  custom-contracts-bridging:
+    needs: build
+    uses: ./.github/workflows/custom-contracts-bridging.yml
+    with:
+      source_chain_kind: "anvil"
+      asc_kind: "local"
+
+  bridge-offchain-worker:
+    needs: build
+    uses: ./.github/workflows/bridge-offchain-worker.yml
+    with:
+      source_chain_kind: "anvil"
+      asc_kind: "local"
+
+  loan-flow:
+    needs: build
+    uses: ./.github/workflows/loan-flow.yml
+    with:
+      source_chain_kind: "anvil"
+      asc_kind: "local"

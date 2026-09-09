@@ -1,0 +1,311 @@
+---
+name: Reusable workflow to exercise bridge-offchain-worker example
+
+"on":
+  workflow_call:
+    inputs:
+      asc_kind:
+        required: true
+        type: string
+      source_chain_kind:
+        required: true
+        type: string
+      checkout_repo:
+        required: false
+        type: string
+        default: ${{ github.event.pull_request.head.repo.full_name }}
+      checkout_ref:
+        required: false
+        type: string
+        default: ${{ github.event.pull_request.head.ref }}
+      runs-on:
+        required: false
+        type: string
+        default: "['ubuntu-26.04']"
+
+permissions: read-all
+
+jobs:
+  example:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - name: Anvil ENV
+        id: anvil
+        if: inputs.source_chain_kind == 'anvil'
+        run: |
+          # shellcheck disable=SC2129
+          echo "source_chain_rpc_url=http://127.0.0.1:8141" >> "$GITHUB_OUTPUT"
+          echo "source_chain_key=2" >> "$GITHUB_OUTPUT"
+          # note: this is Anvil, Account #0
+          echo "wallet_pk=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" >> "$GITHUB_OUTPUT"
+
+      - name: Sepolia ENV
+        id: sepolia
+        if: inputs.source_chain_kind == 'sepolia'
+        run: |
+          # shellcheck disable=SC2129
+          echo "source_chain_rpc_url=https://blockchain.googleapis.com/v1/projects/usc-integration-test/locations/asia-east1/endpoints/ethereum-sepolia/rpc?key=${{ secrets.GOOGLE_SEPOLIA_RPC_KEY }}" >> "$GITHUB_OUTPUT"
+          echo "source_chain_key=1" >> "$GITHUB_OUTPUT"
+          # note: this is NEW_LENDER_ in 1Password & must be funded on Sepolia
+          echo "wallet_pk=${{ secrets.DEVNET_EVM_PK }}" >> "$GITHUB_OUTPUT"
+
+      - name: Local ASC ENV
+        id: local
+        if: inputs.asc_kind == 'local'
+        run: |
+          # shellcheck disable=SC2129
+          echo "creditcoin_rpc_url=http://127.0.0.1:9944" >> "$GITHUB_OUTPUT"
+          echo "proof_builder_url=http://localhost:3100" >> "$GITHUB_OUTPUT"
+          # note: this is Alith's PK
+          echo "wallet_pk=0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133" >> "$GITHUB_OUTPUT"
+
+      - name: Devnet ENV
+        id: devnet
+        if: inputs.asc_kind == 'devnet'
+        run: |
+          # shellcheck disable=SC2129
+          echo "creditcoin_rpc_url=https://rpc.cc3-devnet.creditcoin.network" >> "$GITHUB_OUTPUT"
+          echo "proof_builder_url=https://prover.cc3-devnet.creditcoin.network/" >> "$GITHUB_OUTPUT"
+          # note: this is NEW_LENDER_ in 1Password & must be funded on ASC Devnet
+          echo "wallet_pk=${{ secrets.DEVNET_EVM_PK }}" >> "$GITHUB_OUTPUT"
+
+      - name: Final ENV
+        id: env
+        run: |
+          # shellcheck disable=SC2129
+          echo "creditcoin_rpc_url=${{ steps.local.outputs.creditcoin_rpc_url || steps.devnet.outputs.creditcoin_rpc_url }}" >> "$GITHUB_OUTPUT"
+          echo "proof_builder_url=${{ steps.local.outputs.proof_builder_url || steps.devnet.outputs.proof_builder_url }}" >> "$GITHUB_OUTPUT"
+          echo "execution_chain_private_key=${{ steps.local.outputs.wallet_pk || steps.devnet.outputs.wallet_pk }}" >> "$GITHUB_OUTPUT"
+
+          echo "source_chain_rpc_url=${{ steps.anvil.outputs.source_chain_rpc_url || steps.sepolia.outputs.source_chain_rpc_url }}" >> "$GITHUB_OUTPUT"
+          echo "source_chain_key=${{ steps.anvil.outputs.source_chain_key || steps.sepolia.outputs.source_chain_key }}" >> "$GITHUB_OUTPUT"
+          echo "source_chain_private_key=${{ steps.anvil.outputs.wallet_pk || steps.sepolia.outputs.wallet_pk }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.checkout_repo }}
+          ref: ${{ inputs.checkout_ref }}
+
+      - name: Download binaries
+        if: inputs.asc_kind == 'local'
+        uses: actions/download-artifact@v8
+        with:
+          name: binary-for-testing-ci
+          path: target/release
+
+      - run: mkdir -p /var/tmp/bridge-offchain-worker-logs/
+
+      - name: Start creditcoin3-node - Alice
+        if: inputs.asc_kind == 'local'
+        run: |
+          chmod a+x ./target/release/creditcoin3-node
+          ./target/release/creditcoin3-node \
+            --chain dev \
+            --validator --alice  --pruning archive \
+            --node-key d182d503b7dd97e7c055f33438c7717145840fd66b2a055284ee8d768241a463 \
+            --unsafe-rpc-external --rpc-cors all \
+            --base-path ./alice-data >/var/tmp/bridge-offchain-worker-logs/creditcoin3-node.log 2>&1 &
+
+          .github/wait-for-creditcoin.sh 'http://127.0.0.1:9944'
+
+      - name: Install Foundry
+        run: |
+          export FOUNDRY_DIR="$HOME/.foundry"
+          # first install it
+          curl -L https://foundry.paradigm.xyz | bash
+          ~/.foundry/bin/foundryup
+
+      - name: Start Ethereum simulation with Anvil
+        if: inputs.source_chain_kind == 'anvil'
+        run: |
+          # supported chain keys are hard-coded in attestor/src/cc3.rs and node/src/chain_spec.rs
+          # Anvil1 == chain_key(2)
+          ~/.foundry/bin/anvil --block-time 6 --chain-id 31337 --port 8141 &
+
+          .github/wait-for-ethereum.sh 'http://127.0.0.1:8141'
+
+      - name: Start Attestation Zombienet for Alice - Anvil 1
+        if: inputs.asc_kind == 'local'
+        run: |
+          mkdir -p /var/tmp/bridge-offchain-worker-logs/attestors-alice
+
+          chmod a+x ./target/release/attestor*
+          ./target/release/attestor_zombienet \
+                -n 3 \
+                --bin=./target/release/attestor \
+                --eth-url=ws://localhost:8141 \
+                --cc3-url=ws://localhost:9944 \
+                --funding-address='//Alice' \
+                --config=.github/attestor-config.yaml \
+                --chain-key=2 \
+                >/var/tmp/bridge-offchain-worker-logs/zombienet-alice.log &
+
+          # note: chain_key is hard-coded in this script so waiting only on Anvil_1
+          .github/wait-for-attestors.sh 'http://127.0.0.1:9944'
+
+      - name: Start proof-gen-api-server
+        if: inputs.asc_kind == 'local'
+        run: |
+          chmod a+x ./target/release/proof-gen-api-server
+
+          ./target/release/proof-gen-api-server \
+            --cc3-key "//Alice" \
+            --cc3-rpc-url ws://localhost:9944 \
+            --eth-rpc-url http://localhost:8141 \
+            >/var/tmp/bridge-offchain-worker-logs/proof-gen-api-server.log &
+
+          sleep 30
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: 'yarn'
+      - run: npm install -g yarn
+
+      - name: Setup
+        id: setup
+        run: |
+          yarn install
+
+          SOURCE_CHAIN_RPC_URL="${{ steps.env.outputs.source_chain_rpc_url }}"
+
+          echo "INFO: generate a new wallet"
+          OUTPUT=$(~/.foundry/bin/cast wallet new 2>&1)
+          # WARNING: don't print b/c private key will be visible
+          # echo "$OUTPUT"
+          WALLET_ADDRESS=$(echo "$OUTPUT" | grep Address: | cut -f2 -d: | tr -d ' ')
+          echo "creditcoin_wallet_address=$WALLET_ADDRESS" >> "$GITHUB_OUTPUT"
+          WALLET_PK=$(echo "$OUTPUT" | grep "Private key:" | cut -f2 -d: | tr -d ' ')
+          echo "creditcoin_wallet_pk=$WALLET_PK" >> "$GITHUB_OUTPUT"
+
+          echo "INFO: get 0.006 ETH on source chain"
+          ~/.foundry/bin/cast send "$WALLET_ADDRESS" "0x" \
+            --value 6000000000000000 \
+            --private-key ${{ steps.env.outputs.source_chain_private_key }} \
+            --rpc-url "$SOURCE_CHAIN_RPC_URL"
+
+          CREDITCOIN_RPC_URL="${{ steps.env.outputs.creditcoin_rpc_url }}"
+
+          echo "INFO: get 0.01 CTC on Creditcoin chain"
+          ~/.foundry/bin/cast send "$WALLET_ADDRESS" "0x" \
+            --value 10000000000000000 \
+            --private-key ${{ steps.env.outputs.execution_chain_private_key }} \
+            --rpc-url "$CREDITCOIN_RPC_URL"
+
+          echo "INFO: deploy TestERC20.sol to source chain"
+          OUTPUT=$(~/.foundry/bin/forge create \
+                --broadcast                    \
+                --rpc-url "$SOURCE_CHAIN_RPC_URL"  \
+                --private-key "$WALLET_PK"   \
+                contracts/sol/TestERC20.sol:TestERC20 2>&1)
+          echo "$OUTPUT"
+          SOURCE_CHAIN_CONTRACT_ADDRESS=$(echo "$OUTPUT" | grep "Deployed to:" | cut -f2 -d: | tr -d " ")
+          echo "source_chain_contract_address=$SOURCE_CHAIN_CONTRACT_ADDRESS" >> "$GITHUB_OUTPUT"
+
+          echo "INFO: deploy EvmV1Decoder.sol to Creditcoin chain"
+          OUTPUT=$(~/.foundry/bin/forge create \
+            --broadcast \
+            --rpc-url "$CREDITCOIN_RPC_URL" \
+            --private-key "$WALLET_PK" \
+            node_modules/@gluwa/usc-contracts/contracts/decoding/EvmV1Decoder.sol:EvmV1Decoder 2>&1)
+          echo "$OUTPUT"
+          DECODER_CONTRACT_ADDRESS=$(echo "$OUTPUT" | grep "Deployed to:" | cut -f2 -d: | tr -d " ")
+
+          echo "INFO: deploy ASCMinter.sol to Creditcoin chain"
+          OUTPUT=$(~/.foundry/bin/forge create \
+              --broadcast \
+              --rpc-url "$CREDITCOIN_RPC_URL" \
+              --private-key "$WALLET_PK" \
+              --libraries "node_modules/@gluwa/usc-contracts/contracts/decoding/EvmV1Decoder.sol:EvmV1Decoder:$DECODER_CONTRACT_ADDRESS" \
+              contracts/sol/ASCMinter.sol:ASCMinter 2>&1)
+          echo "$OUTPUT"
+          ASC_MINTER_CONTRACT_ADDRESS=$(echo "$OUTPUT" | grep "Deployed to:" | cut -f2 -d: | tr -d " ")
+          echo "asc_minter_contract_address=$ASC_MINTER_CONTRACT_ADDRESS" >> "$GITHUB_OUTPUT"
+
+          echo "INFO: deploy BridgeTestToken.sol to Creditcoin chain"
+          OUTPUT=$(~/.foundry/bin/forge create \
+              --broadcast \
+              --rpc-url "$CREDITCOIN_RPC_URL" \
+              --private-key "$WALLET_PK" \
+              contracts/sol/BridgeTestToken.sol:BridgeTestToken \
+              --constructor-args "$ASC_MINTER_CONTRACT_ADDRESS" 2>&1)
+          echo "$OUTPUT"
+          ASC_MINTABLE_TOKEN=$(echo "$OUTPUT" | grep "Deployed to:" | cut -f2 -d: | tr -d " ")
+          echo "mintable_token_contract_address=$ASC_MINTABLE_TOKEN" >> "$GITHUB_OUTPUT"
+
+          echo "INFO: Register our ERC20 minter contract as the wrapped token destination for our source chain token"
+          OUTPUT=$(~/.foundry/bin/cast send --rpc-url "$CREDITCOIN_RPC_URL" \
+            "$ASC_MINTER_CONTRACT_ADDRESS"  \
+            "wrapOriginToken(address, address)" "$SOURCE_CHAIN_CONTRACT_ADDRESS" "$ASC_MINTABLE_TOKEN"   \
+            --private-key "$WALLET_PK" 2>&1)
+          echo "$OUTPUT"
+
+          echo "INFO: NOT minting tokens on source chain. Should already have some minted"
+
+      - name: Prepare local .env
+        run: |
+          echo "SOURCE_CHAIN_KEY=${{ steps.env.outputs.source_chain_key }}" > .env
+          echo "SOURCE_CHAIN_RPC_URL='${{ steps.env.outputs.source_chain_rpc_url }}'" >> .env
+          echo "CREDITCOIN_RPC_URL='${{ steps.env.outputs.creditcoin_rpc_url }}'" >> .env
+          echo "PROOF_BUILDER_URL='${{ steps.env.outputs.proof_builder_url }}'" >> .env
+          echo "SOURCE_CHAIN_CUSTOM_CONTRACT_ADDRESS='${{ steps.setup.outputs.source_chain_contract_address }}'" >> .env
+          echo "ASC_CUSTOM_MINTER_CONTRACT_ADDRESS='${{ steps.setup.outputs.asc_minter_contract_address }}'" >> .env
+          echo "CREDITCOIN_WALLET_PRIVATE_KEY='${{ steps.setup.outputs.creditcoin_wallet_pk }}'" >> .env
+          echo "ASC_CUSTOM_MINTABLE_TOKEN='${{ steps.setup.outputs.mintable_token_contract_address }}'" >> .env
+
+      - name: Exercise example
+        run: |
+          source .env
+
+          echo "INFO: Should not have any bridged tokens initially"
+          OUTPUT=$(yarn utils:check_balance "$ASC_CUSTOM_MINTABLE_TOKEN" "${{ steps.setup.outputs.creditcoin_wallet_address }}")
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep "Raw Balance: 0"
+          echo "$OUTPUT" | grep "Formatted Balance: 0.0"
+
+          echo "INFO: start offchain worker"
+          yarn offchain:start_worker > /var/tmp/bridge-offchain-worker-logs/offchain-worker.log 2>&1 &
+          sleep 10
+
+          echo "INFO: burn the tokens (on source chain) we want to bridge"
+          OUTPUT=$(~/.foundry/bin/cast send --rpc-url "$SOURCE_CHAIN_RPC_URL" \
+            "$SOURCE_CHAIN_CUSTOM_CONTRACT_ADDRESS"  \
+            "burn(uint256)" 5000000000000000000        \
+            --private-key "$CREDITCOIN_WALLET_PRIVATE_KEY" 2>&1)
+          echo "$OUTPUT"
+          sleep 20
+
+          # Log that our token burn was detected
+          grep "Detected burn of" /var/tmp/bridge-offchain-worker-logs/offchain-worker.log
+
+          # wait for attestations for the source block where we burned the tokens
+          echo "INFO: Wait for mint query to be processed by the ASC contract"
+          sleep 960
+          grep "Tokens minted!" /var/tmp/bridge-offchain-worker-logs/offchain-worker.log
+
+          echo "INFO: Verify bridged tokens"
+          OUTPUT=$(yarn utils:check_balance "$ASC_CUSTOM_MINTABLE_TOKEN" "${{ steps.setup.outputs.creditcoin_wallet_address }}")
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep "Raw Balance: 5000000000000000000"
+          echo "$OUTPUT" | grep "Formatted Balance: 5.0"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bridge-offchain-worker-logs
+          path: |
+            /var/tmp/bridge-offchain-worker-logs/
+            ./logs
+          include-hidden-files: true
+
+      - name: Kill processes
+        if: always()
+        continue-on-error: true
+        run: |
+          killall -9 attestor_zombienet
+          killall -9 attestor
+          killall -9 creditcoin3-node
+          killall -9 node
+          killall -9 tsx

@@ -1,0 +1,70 @@
+---
+name: Reusable workflow to build a creditcoin3 client
+
+"on":
+  workflow_call:
+    inputs:
+      build-options:
+        required: true
+        type: string
+      version-string:
+        required: true
+        type: string
+
+permissions: read-all
+
+# GCC 13+ (Ubuntu 26.04) no longer transitively includes
+# <cstdint>. The bundled RocksDB 8.1.1 headers (librocksdb-sys 0.11.0+8.1.1)
+# use uint64_t without including it, so force-include cstdint when compiling C/C++.
+env:
+  CXXFLAGS: "-include cstdint"
+
+jobs:
+  build-creditcoin3:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: gluwa/creditcoin3
+          ref: usc-dev
+
+      - name: Install protobuf
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # The ubuntu-26.04 image does not ship libclang, which bindgen (a build
+      # dependency of librocksdb-sys and libsqlite3-sys) needs to generate FFI
+      # bindings. Without it clang-sys fails to find libclang.so and panics.
+      - name: Install libclang
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev llvm-dev
+
+      - name: Configure rustc version
+        run: |
+          RUSTC_VERSION=$(grep channel rust-toolchain.toml | tail -n1 | tr -d " " | cut -f2 -d'"')
+          echo "RUSTC_VERSION=$RUSTC_VERSION" >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUSTC_VERSION }}
+          targets: wasm32-unknown-unknown
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build SUT
+        uses: gluwa/cargo@dev
+        with:
+          command: build
+          args: ${{ inputs.build-options }}
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-for-${{ inputs.version-string }}
+          path: |
+            target/release/attestor
+            target/release/attestor_zombienet
+            target/release/creditcoin3-node
+            target/release/proof-gen-api-server
