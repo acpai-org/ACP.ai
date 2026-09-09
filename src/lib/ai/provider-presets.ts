@@ -43,12 +43,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: "https://api.together.xyz/v1",
     host: "api.together.xyz",
   },
-  {
-    id: "ollama",
-    labelKey: "aiprovider.presetOllama",
-    baseUrl: "http://localhost:11434/v1",
-    host: "localhost:11434",
-  },
 ];
 
 /** Apply a preset to a config draft: fills the base URL only (N1: presets
