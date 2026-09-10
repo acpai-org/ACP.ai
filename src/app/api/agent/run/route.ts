@@ -14,7 +14,7 @@ import type { WalletContext } from "@/lib/ai/system-prompt";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const runtime = "nodejs";
-export const maxDuration = 600;
+export const maxDuration = 300;
 
 interface IncomingMessage {
   role: "user" | "assistant";
