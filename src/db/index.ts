@@ -17,7 +17,7 @@ export type AppDatabase = BetterSQLite3Database<{
 
 // DB path: overridable via ACP_DB_PATH (tests isolate their DB this way —
 // chdir would break the contracts/ compile service's relative paths).
-const DB_PATH = process.env.ACP_DB_PATH ?? path.join(process.cwd(), "sqlite.db");
+const DB_PATH = process.env.ACP_DB_PATH ?? (process.env.VERCEL ? "/tmp/sqlite.db" : path.join(process.cwd(), "sqlite.db"));
 
 const globalForDb = globalThis as unknown as {
   __sqlite?: Database.Database;
