@@ -76,6 +76,31 @@ export function listActions(limit = 20): AgentActionRow[] {
 }
 
 /**
+ * Post-run resolution (§4.6 "the log catches up from the receipt"): the
+ * background receipt tracker reports a terminal status for a call whose run
+ * already ended — the session binding may be gone (swept, or another
+ * serverless container), so resolve the action row by callId directly.
+ * Only flips a row that is still non-terminal ("unknown"/"broadcast"/…);
+ * a row the run itself already finalized stays authoritative. Returns
+ * whether a row was found and patched.
+ */
+export function resolveActionByCall(callId: string, status: string, patch: ActionPatch): boolean {
+  ensureDb();
+  const rows = db
+    .select()
+    .from(agentActions)
+    .where(eq(agentActions.callId, callId))
+    .orderBy(desc(agentActions.createdAt))
+    .limit(1)
+    .all();
+  const row = rows[0];
+  if (!row) return false;
+  if (["succeeded", "failed", "declined", "interrupted"].includes(row.status)) return false;
+  patchAction(row.id, { status, ...patch });
+  return true;
+}
+
+/**
  * P10 fund-safety guard: find prior actions of a tool whose transaction may
  * still be in flight (status "unknown"/"broadcast"/"signed" — broadcast but
  * receipt never arrived). A user- or model-initiated RETRY of the same call

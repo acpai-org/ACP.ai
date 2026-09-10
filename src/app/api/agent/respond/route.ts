@@ -1,5 +1,5 @@
 import { resolveResponse, getCallAction } from "@/lib/agent/session";
-import { patchAction } from "@/lib/agent/action-log";
+import { patchAction, resolveActionByCall } from "@/lib/agent/action-log";
 import type { AgentRespondBody, ToolClientResult } from "@/lib/agent/events";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,24 +86,43 @@ export async function POST(req: Request) {
 
   if (body.kind === "tool_status") {
     const status = actionStatusFor(body.status);
+    // A result payload rides ONLY the background receipt tracker's terminal
+    // resolution (mid-flight transitions never carry one) — it patches the
+    // row's outcome, not just its status.
+    const resultPatch = body.result ? { result: body.result as Record<string, unknown> } : {};
     const bound = getCallAction(body.sessionId, body.callId);
-    if (!bound || !status) {
-      // No parked call (late status after completion, or a stale run) — the
-      // final tool_result is authoritative; nothing to patch.
-      return new Response(JSON.stringify({ delivered: false }), {
+    if (bound && status) {
+      // Mid-flight status only: patch the row status + chain so the
+      // Actions/Wallet surfaces reflect the live lifecycle. The tx hash and
+      // full summary land with the final tool_result (the client's live
+      // tx-lifecycle store carries the hash for instant UI in the meantime).
+      patchAction(bound.actionId, {
+        status,
+        ...resultPatch,
+        ...(body.chainId != null ? { chainId: body.chainId } : {}),
+      });
+      return new Response(JSON.stringify({ delivered: true }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
     }
-    // Mid-flight status only: patch the row status + chain so the
-    // Actions/Wallet surfaces reflect the live lifecycle. The tx hash and
-    // full summary land with the final tool_result (the client's live
-    // tx-lifecycle store carries the hash for instant UI in the meantime).
-    patchAction(bound.actionId, {
-      status,
-      ...(body.chainId != null ? { chainId: body.chainId } : {}),
-    });
-    return new Response(JSON.stringify({ delivered: true }), {
+    if (status && body.result) {
+      // Run already over (session swept, or another serverless container):
+      // the tracker's terminal resolution flips the action row by callId.
+      // Gated on the result payload so a stale mid-flight ping can never
+      // mutate a finished row.
+      const resolved = resolveActionByCall(body.callId, status, {
+        ...resultPatch,
+        ...(body.chainId != null ? { chainId: body.chainId } : {}),
+      });
+      return new Response(JSON.stringify({ delivered: resolved }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    // No parked call and no resolvable row (late status after completion, or
+    // a stale run) — the final tool_result is authoritative; nothing to patch.
+    return new Response(JSON.stringify({ delivered: false }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });

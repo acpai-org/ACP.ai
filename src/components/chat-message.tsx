@@ -353,6 +353,24 @@ export const ChatMessage = memo(function ChatMessage({
   // or a confirmation landing counts as stream progress (resets the timer).
   const progressSignature = `${message.content?.length ?? 0}:${message.reasoning?.length ?? 0}:${message.trace?.length ?? 0}:${message.trace?.reduce((a, s) => a + (s.status?.length ?? 0), 0) ?? 0}:${message.trace?.reduce((a, s) => a + (s.detail?.text?.length ?? 0), 0) ?? 0}:${message.trace?.reduce((a, s) => a + (s.detail?.txHash?.length ?? 0), 0) ?? 0}:${message.pendingConfirmation ? 1 : 0}`;
 
+  // A finished text-beat message with nothing renderable (no narration, no
+  // visible reasoning, no trace, no card/pill) used to paint a bare empty
+  // bubble + timestamp — the "separate empty message box" bug. Defense in
+  // depth behind use-agent-run's empty-beat sweep (which deletes them at the
+  // source, including rows persisted before that fix): never render one.
+  if (
+    isTextBeat &&
+    !streaming &&
+    !hasContent &&
+    !(hasReasoning && showThinking) &&
+    (message.trace?.length ?? 0) === 0 &&
+    !message.intent &&
+    !message.pendingConfirmation &&
+    !message.status
+  ) {
+    return null;
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 14, scale: 0.97 }}

@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   BadgeCheck,
   History,
+  Info,
   ArrowRight,
   type LucideIcon,
 } from "lucide-react";
@@ -384,6 +385,14 @@ export function AttestcoinPanel() {
             ))}
           </div>
 
+          {/* The #1 "is this broken?" question: Creditcoin is the DESTINATION
+              chain (proofs verify on it), so it can never attest itself and
+              never appears in the ChainInfo source list. */}
+          <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-2">
+            <Info className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
+            <span>{t("wallet.attestSourceNote")}</span>
+          </p>
+
           <WatcherRow poller={state.data.poller} />
 
           <RecentAttestations />
@@ -444,6 +453,10 @@ export function AttestcoinPanel() {
                   <AttestationChainCard key={chain.chainKey} chain={chain} />
                 ))}
               </div>
+              <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-2">
+                <Info className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
+                <span>{t("wallet.attestSourceNote")}</span>
+              </p>
             </div>
           ) : (
             <div className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-6 text-center">

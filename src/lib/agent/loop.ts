@@ -715,7 +715,14 @@ async function executeToolCall(call: ToolCallRequest, ctx: ExecContext): Promise
     }
 
     // ── Record + emit the outcome ────────────────────────────────────────────
-    const finalStatus: TraceStepStatus = outcome.ok ? "succeeded" : "failed";
+    // receipt_timeout/unknown_status land as the "unknown" trace status — the
+    // tx WAS broadcast and its outcome is genuinely unresolved, so "failed"
+    // would be a lie (the action-log row already says "unknown").
+    const finalStatus: TraceStepStatus = outcome.ok
+      ? "succeeded"
+      : outcome.error === "receipt_timeout" || outcome.error === "unknown_status"
+        ? "unknown"
+        : "failed";
     const resultPayload: Record<string, unknown> = {
       ok: outcome.ok,
       summary: outcome.summary,

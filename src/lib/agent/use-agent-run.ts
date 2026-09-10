@@ -13,6 +13,7 @@ import {
   execDeployContract,
   execConditionalRelease,
   execCrossChainSwap,
+  trackUnknownTx,
   type ExecutorWallet,
 } from "@/lib/agent/client-executors";
 
@@ -78,6 +79,23 @@ function sessionIdFor(chatSessionId: string): string {
   }
 }
 
+/**
+ * The !delivered fallback renders the executor's outcome directly into the
+ * chat (serverless: the respond POST cannot reach the parked loop, so the
+ * stream is cancelled and the result narrated locally). `result.summary` is
+ * written for the MODEL — it carries directives like "tell the user honestly"
+ * that must never be pasted into the transcript — so map the machine-facing
+ * result to user-facing words here.
+ */
+function userFacingFallback(result: ToolClientResult): string {
+  if (result.error === "receipt_timeout") {
+    const url = typeof result.data?.explorerUrl === "string" ? (result.data.explorerUrl as string) : undefined;
+    const hash = result.txHash ? ` (${result.txHash.slice(0, 14)}…)` : "";
+    return `The transaction was broadcast${hash} but its receipt hasn't arrived yet. Its status is UNKNOWN — don't resend it (double-spend risk). Background tracking keeps checking; you can follow it${url ? ` here: ${url}` : " in your wallet's activity."}`;
+  }
+  return result.summary;
+}
+
 export function useAgentRun() {
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -109,6 +127,28 @@ export function useAgentRun() {
       }
       busyRef.current = true;
       const sid = useChatStore.getState().activeId;
+      // Declared OUTSIDE the try so the catch block (network drop mid-run)
+      // can finalize the same surfaces the run created — block-scoped try
+      // declarations are invisible to catch.
+      const patchMsg = (id: string, updater: (m: ChatMessageData) => ChatMessageData) => {
+        if (!sid) return;
+        useChatStore.getState().updateMessage(sid, id, updater);
+      };
+      let traceMsgId: string | null = null; // the one trace-beat message
+      // Every text-beat message this run created (the lead + narration
+      // beats) — the run-end sweep removes the ones that stayed empty so a
+      // direct tool action can't leave an empty bubble behind.
+      const createdTextMsgIds = new Set<string>([opts.assistantMessageId]);
+      const cleanupEmptyTextBeats = () => {
+        const msgs = sid ? (useChatStore.getState().sessions[sid]?.messages ?? []) : [];
+        for (const id of createdTextMsgIds) {
+          const m = msgs.find((x) => x.id === id);
+          if (!m || m.beat !== "text") continue;
+          if (!m.content.trim() && !m.reasoning?.trim() && !m.trace?.length && !m.intent && !m.pendingConfirmation) {
+            if (sid) useChatStore.getState().deleteMessage(sid, id);
+          }
+        }
+      };
       try {
         if (!sid) return { error: "No chat session.", errorCode: "no-session", aborted: false };
         const sessionId = sessionIdFor(sid);
@@ -123,13 +163,10 @@ export function useAgentRun() {
         const patch = (updater: (m: ChatMessageData) => ChatMessageData) => {
           useChatStore.getState().updateMessage(sid, opts.assistantMessageId, updater);
         };
-        const patchMsg = (id: string, updater: (m: ChatMessageData) => ChatMessageData) => {
-          useChatStore.getState().updateMessage(sid, id, updater);
-        };
         let textMsgId: string | null = opts.assistantMessageId; // active narration message
-        let traceMsgId: string | null = null; // the one trace-beat message
         const mkTextMsg = (): string => {
           const id = newChatMsgId();
+          createdTextMsgIds.add(id);
           useChatStore.getState().addMessage(sid, {
             id,
             role: "assistant",
@@ -190,6 +227,15 @@ export function useAgentRun() {
           for (const id of [textMsgId, traceMsgId]) {
             if (!id) continue;
             patchMsg(id, (m) => ({ ...m, streaming: false }));
+          }
+        };
+        /** Run is over (or the stream died without a run_finished event —
+         * cancelled reader, network drop): stop every surface from rendering
+         * "streaming" and stamp the finish reason exactly once. */
+        const markRunDone = (finishReason: "stop" | "error" | "interrupted" | "max_rounds" | "invalid_loop") => {
+          for (const id of [opts.assistantMessageId, traceMsgId]) {
+            if (!id) continue;
+            patchMsg(id, (m) => ({ ...m, streaming: false, runFinish: m.runFinish ?? finishReason }));
           }
         };
         void store; // (store captured once for clarity; reads use fresh getState)
@@ -318,13 +364,29 @@ export function useAgentRun() {
             ...(result.ok ? {} : result.error ? { error: result.error } : {}),
           });
 
+          // Receipt never arrived within the run: keep fetching AFTER the run
+          // ends — a background tracker polls for the receipt (24h cap) and
+          // flips the live lifecycle store + the persistent action row the
+          // moment it lands. The "unknown" state is honest, not terminal.
+          if (result.error === "receipt_timeout" && result.txHash && result.chainId != null) {
+            trackUnknownTx({
+              callId,
+              sessionId,
+              chainId: result.chainId,
+              txHash: result.txHash as `0x${string}`,
+              what: tool.replaceAll("_", " "),
+            });
+          }
+
           // Instantly patch trace step with terminal status in UI store so it NEVER stays spinning
           const traceId = traceMsgId ?? ensureTraceMsg();
           const finalStatus: TraceStepStatus = result.ok
             ? "succeeded"
             : result.error === "user_rejected"
               ? "declined"
-              : "failed";
+              : result.error === "receipt_timeout" || result.error === "unknown_status"
+                ? "unknown"
+                : "failed";
           patchMsg(traceId, (m) => ({
             ...m,
             trace: (m.trace ?? []).map((st) =>
@@ -370,17 +432,21 @@ export function useAgentRun() {
           if (!delivered) {
             // In serverless environments like Vercel, the response handler runs in a separate
             // container and cannot resolve the in-memory promise in the streaming container.
-            // Cancel the hanging stream and surface the result narration directly.
+            // Cancel the hanging stream and surface the result narration directly — in
+            // USER-facing words: the raw result.summary is written for the model (it carries
+            // directives like "tell the user honestly") and must never be pasted into the chat.
             try {
               await reader.cancel();
             } catch {}
             const tid = routeText();
             patchMsg(tid, (m) => ({
               ...m,
-              content: (m.content ? m.content + "\n\n" : "") + result.summary,
+              content: (m.content ? m.content + "\n\n" : "") + userFacingFallback(result),
               streaming: false,
             }));
             finalizeAll();
+            markRunDone("stop");
+            cleanupEmptyTextBeats();
           }
         };
 
@@ -489,12 +555,13 @@ export function useAgentRun() {
                 if (traceMsgId) {
                   patchMsg(traceMsgId, (m) => ({ ...m, streaming: false, runFinish: evt.finishReason, pendingConfirmation: undefined }));
                 }
-                // Clean up an EMPTY leading narration message (model went
-                // straight to tool calls with no announcement).
-                const lead = useChatStore.getState().sessions[sid]?.messages.find((m) => m.id === opts.assistantMessageId);
-                if (lead && lead.beat === "text" && !lead.content.trim() && !lead.reasoning?.trim()) {
-                  useChatStore.getState().deleteMessage(sid, opts.assistantMessageId);
-                }
+                // Clean up EVERY empty text-beat message this run created —
+                // the lead when the model went straight to tool calls with no
+                // announcement, and any narration beat that never received
+                // text. (The old cleanup only removed the lead, so a
+                // reasoning-only or mid-run-created empty bubble survived as
+                // an empty message box.)
+                cleanupEmptyTextBeats();
                 break;
               default:
                 break;
@@ -512,10 +579,32 @@ export function useAgentRun() {
               streaming: false,
               runFinish: "interrupted",
             }));
+            if (traceMsgId) {
+              useChatStore.getState().updateMessage(sidNow, traceMsgId, (m) => ({
+                ...m,
+                streaming: false,
+                runFinish: m.runFinish ?? "interrupted",
+              }));
+            }
           }
+          cleanupEmptyTextBeats();
           return { error: null, errorCode: null, aborted: true };
         }
         const msg = err instanceof Error ? err.message : "Network error";
+        // The stream died mid-run: finalize every surface, land the error text
+        // in the lead BEFORE the empty sweep (chat-view's error handler only
+        // fills an existing message — a deleted lead would swallow the error),
+        // then sweep the remaining empty bubbles.
+        patchMsg(opts.assistantMessageId, (m) => ({
+          ...m,
+          streaming: false,
+          runFinish: m.runFinish ?? "error",
+          content: m.content || t("chat.errorEncountered", { error: msg }),
+        }));
+        if (traceMsgId) {
+          patchMsg(traceMsgId, (m) => ({ ...m, streaming: false, runFinish: m.runFinish ?? "error" }));
+        }
+        cleanupEmptyTextBeats();
         return { error: msg, errorCode: "network-error", aborted: false };
       } finally {
         busyRef.current = false;

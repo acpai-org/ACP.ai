@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Activity,
+  AlertCircle,
   ArrowLeftRight,
   ArrowUpRight,
   Braces,
@@ -72,6 +73,9 @@ const STATUS_CONFIG: Record<TraceStepStatus, { icon: typeof CircleDashed; classN
   skipped: { icon: CircleDashed, className: "text-foreground/25" },
   declined: { icon: X, className: "text-foreground/30" },
   interrupted: { icon: X, className: "text-warning" },
+  // Broadcast but the receipt never arrived within the run: genuinely
+  // unresolved — warning-colored, NOT the red of a failure.
+  unknown: { icon: AlertCircle, className: "text-warning" },
 };
 
 const IN_FLIGHT: TraceStepStatus[] = [
@@ -84,7 +88,7 @@ const IN_FLIGHT: TraceStepStatus[] = [
   "confirming",
 ];
 
-const FINISHED: TraceStepStatus[] = ["succeeded", "failed", "declined", "interrupted"];
+const FINISHED: TraceStepStatus[] = ["succeeded", "failed", "declined", "interrupted", "unknown"];
 
 // ── P22 design pass ─────────────────────────────────────────────────────
 // Every tool gets its OWN symbol — the row's glyph answers "what is this
@@ -130,6 +134,7 @@ const TERMINAL_BADGE: Partial<Record<TraceStepStatus, { icon: LucideIcon; classN
   failed: { icon: X, className: "text-danger" },
   declined: { icon: X, className: "text-muted-2" },
   interrupted: { icon: X, className: "text-warning" },
+  unknown: { icon: AlertCircle, className: "text-warning" },
 };
 
 const TOOL_LABEL_KEYS: Record<string, string> = {

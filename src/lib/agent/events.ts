@@ -19,7 +19,8 @@ export type TraceStepStatus =
   | "failed"
   | "skipped"
   | "declined"
-  | "interrupted";
+  | "interrupted"
+  | "unknown";
 
 export interface TraceStepDetail {
   /** Human-readable line for the step body (i18n'd client-side by key where possible). */
@@ -123,6 +124,10 @@ export type AgentRespondBody =
       chainId?: number;
       blockNumber?: number;
       error?: string;
+      /** Terminal resolution from the background receipt tracker: when a
+       * broadcast-but-unconfirmed tx's receipt finally lands, the tracker
+       * patches the action row's result too (not just its status). */
+      result?: { ok: boolean; summary: string; txHash?: string; chainId?: number };
     };
 
 export interface ToolClientResult {
