@@ -177,7 +177,7 @@ export async function execTransfer(
         to: args.recipient as Address,
         value: amountBase,
         chain: VIEM_CHAINS[args.chain] ?? null,
-        account: null,
+        account: w.address!,
       })) as Hash;
     } else {
       hash = (await w.walletClient!.writeContract({
@@ -186,7 +186,7 @@ export async function execTransfer(
         functionName: "transfer",
         args: [args.recipient as Address, amountBase],
         chain: VIEM_CHAINS[args.chain] ?? null,
-        account: null,
+        account: w.address!,
       })) as Hash;
     }
 
@@ -259,7 +259,7 @@ export async function execBatchTransfer(
           to: t.recipient as Address,
           value: amountBase,
           chain: VIEM_CHAINS[args.chain] ?? null,
-          account: null,
+          account: w.address!,
         })) as Hash;
       } else {
         hash = (await w.walletClient!.writeContract({
@@ -268,7 +268,7 @@ export async function execBatchTransfer(
           functionName: "transfer",
           args: [t.recipient as Address, amountBase],
           chain: VIEM_CHAINS[args.chain] ?? null,
-          account: null,
+          account: w.address!,
         })) as Hash;
       }
       if (!firstHash) firstHash = hash;
@@ -374,7 +374,7 @@ export async function execDeployContract(
       args: deployArgs,
       value: compiled.payableValue ? BigInt(compiled.payableValue) : undefined,
       chain: VIEM_CHAINS[chainId] ?? null,
-      account: null,
+      account: w.address!,
     })) as Hash;
 
     progress({ text: "Deployment broadcast — waiting for the receipt…", txHash: deployHash, chainId }, "broadcast");
@@ -496,7 +496,7 @@ export async function execConditionalRelease(
         proof.continuityProof.roots.map((r) => r as `0x${string}`),
       ],
       chain: VIEM_CHAINS[chainId] ?? null,
-      account: null,
+      account: w.address!,
     })) as Hash;
 
     progress({ text: "Proof submitted — waiting for on-chain verification + release…", txHash: hash, chainId }, "broadcast");
@@ -605,7 +605,7 @@ export async function execProofReleaseCall(
         proof.continuityProof.roots.map((r) => r as `0x${string}`),
       ],
       chain: VIEM_CHAINS[chainId] ?? null,
-      account: null,
+      account: w.address!,
     })) as Hash;
     progress({ text: "Broadcast — waiting for on-chain verification…", txHash: hash, chainId }, "broadcast");
     const receipt = await waitForTx(chainId, hash);
@@ -702,7 +702,7 @@ export async function execCrossChainSwap(
       bytecode: compiledSource.artifact.bytecode as `0x${string}`,
       args: [],
       chain: VIEM_CHAINS[11155111] ?? null,
-      account: null,
+      account: w.address!,
     })) as Hash;
     progress({ text: "Lock contract deployed — waiting for receipt…", txHash: sourceHash, chainId: 11155111 }, "broadcast");
     const sourceReceipt = await waitForTx(11155111, sourceHash);
@@ -736,7 +736,7 @@ export async function execCrossChainSwap(
       args: [BigInt(sourceChainKey), sourceAddress] as never[],
       value: fundWei,
       chain: VIEM_CHAINS[102031] ?? null,
-      account: null,
+      account: w.address!,
     })) as Hash;
     progress({ text: "Release contract deployed — waiting for receipt…", txHash: destHash, chainId: 102031 }, "broadcast");
     const destReceipt = await waitForTx(102031, destHash);
@@ -771,7 +771,7 @@ export async function execCrossChainSwap(
       args: [destBeneficiary as Address, BigInt(rate)],
       value: lockWei,
       chain: VIEM_CHAINS[11155111] ?? null,
-      account: null,
+      account: w.address!,
     })) as Hash;
     progress({ text: "Lock broadcast — waiting for receipt…", txHash: lockHash, chainId: 11155111 }, "broadcast");
     const lockReceipt = await waitForTx(11155111, lockHash);
