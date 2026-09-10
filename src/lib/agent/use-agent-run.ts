@@ -5,7 +5,7 @@ import { useAccount, useWalletClient, useSwitchChain } from "wagmi";
 import { useChatStore, newChatMsgId } from "@/lib/chat/chat-store";
 import { useI18n } from "@/lib/i18n";
 import type { ChatMessageData } from "@/lib/types";
-import type { AgentStreamEvent, ToolClientResult, TraceStepDetail } from "@/lib/agent/events";
+import type { AgentStreamEvent, ToolClientResult, TraceStepDetail, TraceStepStatus } from "@/lib/agent/events";
 import { recordTxEvent, type TxLifecycleStatus } from "@/lib/agent/tx-lifecycle";
 import {
   execTransfer,
@@ -227,7 +227,7 @@ export function useAgentRun() {
           tool: string,
           args: Record<string, unknown>,
         ): Promise<void> => {
-          const progress = (detail: TraceStepDetail, status?: "awaiting_signature" | "broadcast" | "confirming") => {
+          const progress = (detail: TraceStepDetail, status?: "awaiting_signature" | "broadcast" | "confirming" | "succeeded") => {
             // Trace steps live on the dedicated trace-beat message (C1) — the
             // dispatch is async, so read the CURRENT trace message id (the
             // trace message is created by step_started before dispatch).
@@ -244,7 +244,7 @@ export function useAgentRun() {
             let lifecycle: TxLifecycleStatus | null = null;
             if (status === "awaiting_signature") lifecycle = "requested";
             else if (status === "broadcast") lifecycle = "signed";
-            else if (status === "confirming") lifecycle = "confirmed";
+            else if (status === "confirming" || status === "succeeded") lifecycle = "confirmed";
             if (lifecycle) {
               recordTxEvent(callId, sessionId, {
                 status: lifecycle,
@@ -317,13 +317,71 @@ export function useAgentRun() {
             ...(result.chainId != null ? { chainId: result.chainId } : {}),
             ...(result.ok ? {} : result.error ? { error: result.error } : {}),
           });
-          void fetch("/api/agent/respond", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ sessionId, callId, kind: "tool_result", result }),
-          }).catch(() => {
-            /* the stream's abort handling covers lost runs */
-          });
+
+          // Instantly patch trace step with terminal status in UI store so it NEVER stays spinning
+          const traceId = traceMsgId ?? ensureTraceMsg();
+          const finalStatus: TraceStepStatus = result.ok
+            ? "succeeded"
+            : result.error === "user_rejected"
+              ? "declined"
+              : "failed";
+          patchMsg(traceId, (m) => ({
+            ...m,
+            trace: (m.trace ?? []).map((st) =>
+              st.stepId === stepId
+                ? {
+                    ...st,
+                    status: finalStatus,
+                    result: {
+                      ok: result.ok,
+                      summary: result.summary,
+                      txHash: result.txHash,
+                      chainId: result.chainId,
+                      data: result.data,
+                    },
+                    detail: {
+                      ...st.detail,
+                      text: result.summary,
+                      ...(result.txHash ? { txHash: result.txHash } : {}),
+                      ...(result.chainId != null ? { chainId: result.chainId } : {}),
+                      ...(result.data?.explorerUrl ? { explorerUrl: String(result.data.explorerUrl) } : {}),
+                    },
+                    finishedAt: Date.now(),
+                  }
+                : st,
+            ),
+          }));
+
+          let delivered = false;
+          try {
+            const resp = await fetch("/api/agent/respond", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ sessionId, callId, kind: "tool_result", result }),
+            });
+            if (resp.ok) {
+              const b = (await resp.json().catch(() => ({}))) as { delivered?: boolean };
+              delivered = Boolean(b?.delivered);
+            }
+          } catch {
+            delivered = false;
+          }
+
+          if (!delivered) {
+            // In serverless environments like Vercel, the response handler runs in a separate
+            // container and cannot resolve the in-memory promise in the streaming container.
+            // Cancel the hanging stream and surface the result narration directly.
+            try {
+              await reader.cancel();
+            } catch {}
+            const tid = routeText();
+            patchMsg(tid, (m) => ({
+              ...m,
+              content: (m.content ? m.content + "\n\n" : "") + result.summary,
+              streaming: false,
+            }));
+            finalizeAll();
+          }
         };
 
         for (;;) {
@@ -480,15 +538,30 @@ export function useAgentRun() {
         pendingConfirmation: undefined,
         trace: (m.trace ?? []).map((st) =>
           st.callId === callId && st.status === "awaiting_confirmation"
-            ? { ...st, status: approved ? "running" : "declined" }
+            ? { ...st, status: approved ? "running" : "declined", finishedAt: approved ? undefined : Date.now() }
             : st,
         ),
       }));
-      await fetch("/api/agent/respond", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId, callId, kind: "confirmation", approved }),
-      }).catch(() => {});
+      let delivered = false;
+      try {
+        const resp = await fetch("/api/agent/respond", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId, callId, kind: "confirmation", approved }),
+        });
+        if (resp.ok) {
+          const b = (await resp.json().catch(() => ({}))) as { delivered?: boolean };
+          delivered = Boolean(b?.delivered);
+        }
+      } catch {
+        delivered = false;
+      }
+      if (!delivered && !approved) {
+        useChatStore.getState().updateMessage(sid, assistantMessageId, (m) => ({
+          ...m,
+          streaming: false,
+        }));
+      }
     },
     [],
   );

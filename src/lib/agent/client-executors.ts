@@ -35,7 +35,7 @@ function markContactUsed(recipient: string): void {
 // supports it (pre-added chains; WC session namespaces).
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ProgressFn = (detail: TraceStepDetail, status?: "awaiting_signature" | "broadcast" | "confirming") => void;
+export type ProgressFn = (detail: TraceStepDetail, status?: "awaiting_signature" | "broadcast" | "confirming" | "succeeded") => void;
 
 export interface ExecutorWallet {
   address: Address | undefined;
@@ -204,7 +204,7 @@ export async function execTransfer(
         error: "reverted",
       };
     }
-    progress({ text: `Confirmed in block ${receipt.blockNumber}`, txHash: hash, chainId: args.chain }, "confirming");
+    progress({ text: `Confirmed in block ${receipt.blockNumber}`, txHash: hash, chainId: args.chain }, "succeeded");
     markContactUsed(args.recipient);
     return {
       ok: true,
@@ -396,7 +396,7 @@ export async function execDeployContract(
       finalAddress = null;
     }
 
-    progress({ text: `Deployed at ${finalAddress ?? "address pending"}`, txHash: deployHash, chainId, address: finalAddress ?? undefined }, "confirming");
+    progress({ text: `Deployed at ${finalAddress ?? "address pending"}`, txHash: deployHash, chainId, address: finalAddress ?? undefined }, "succeeded");
     return {
       ok: true,
       summary: `${compiled.artifact.contractName} deployed on ${chain.name} at ${finalAddress ?? "(see explorer)"} (block ${receipt.blockNumber}).`,
