@@ -34,7 +34,7 @@
 
 > [!NOTE]
 > The demo video will be ready in a few days. For now, the project is deployed on web in beta form.
-> Link URL (beta): https://acp-ai.netlify.app<br>
+> Link URL (beta): https://acp-ai.vercel.app/ (Fallback: https://acp-ai.netlify.app)<br>
 > The Track tracks for this project are the DeFi/AI Track.<br>
 > Low commits are because local commits have been excluded.
 
