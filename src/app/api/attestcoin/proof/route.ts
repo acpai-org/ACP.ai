@@ -8,6 +8,7 @@ import { getAttestcoinStatus, getAttestationBounds } from "@/lib/attestcoin/stat
 import { decodeTxBytes } from "@/lib/attestcoin/decode";
 import { VIEM_CHAINS, getChainByChainId } from "@/lib/chains/registry";
 
+export const revalidate = 0;
 export const dynamic = "force-dynamic";
 
 const TX_HASH_RE = /^0x[a-fA-F0-9]{64}$/;

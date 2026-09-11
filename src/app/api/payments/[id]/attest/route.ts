@@ -7,6 +7,7 @@ import { getTxProof } from "@/lib/attestcoin/proof";
 import { ensureSourceChainMapFresh, sourceChainByEvmId } from "@/lib/attestcoin/chains";
 import { submissionAvailability, submissionEnv, submitProofOnChain } from "@/lib/attestcoin/submit";
 
+export const revalidate = 0;
 export const dynamic = "force-dynamic";
 
 interface RouteParams {

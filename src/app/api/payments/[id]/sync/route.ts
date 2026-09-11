@@ -20,6 +20,8 @@ interface RouteParams {
  * an Attestcoin Protocol attestation lookup so "settled" means "verifiably
  * settled", not just "transaction mined".
  */
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function POST(_request: Request, { params }: RouteParams) {
   ensureDb();
   const { id } = await params;

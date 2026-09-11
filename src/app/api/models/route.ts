@@ -124,6 +124,8 @@ async function fetchModelsWithRetry(
   return { ...first, retried: true };
 }
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function POST(req: Request) {
   let body: { baseUrl?: string; apiKey?: string };
   try {

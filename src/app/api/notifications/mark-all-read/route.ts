@@ -11,6 +11,8 @@ import { and, eq, inArray } from "drizzle-orm";
 // unknown ids simply match nothing.
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function POST(req: Request) {
   try {
     ensureDb();

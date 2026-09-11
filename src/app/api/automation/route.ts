@@ -24,6 +24,8 @@ import {
 // visible and calls POST /api/automation/[id]/fire right before executing.
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export const runtime = "nodejs";
 
 export async function GET() {

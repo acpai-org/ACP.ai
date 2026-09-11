@@ -5,6 +5,8 @@ import { db, ensureDb } from "@/db";
 import { recurringSchedules } from "@/db/schema";
 import { isKnownCadenceSpec } from "@/lib/recurring/cadence";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function GET(request: Request) {
   ensureDb();
   const url = new URL(request.url);

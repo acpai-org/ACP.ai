@@ -4,6 +4,7 @@ import { db, ensureDb } from "@/db";
 import { payments } from "@/db/schema";
 import { ensureSourceChainMapFresh, sourceChainByEvmId } from "@/lib/attestcoin/chains";
 
+export const revalidate = 0;
 export const dynamic = "force-dynamic";
 
 /** How many recent attestations the wallet feed shows. */

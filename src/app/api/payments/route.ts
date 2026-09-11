@@ -6,6 +6,8 @@ import { validateCreatePayment } from "@/lib/payment";
 import { submissionAvailability } from "@/lib/attestcoin/submit";
 import { getPollerStats } from "@/lib/attestcoin/poller";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function GET() {
   ensureDb();
   const rows = db.select().from(payments).orderBy(desc(payments.createdAt)).all();

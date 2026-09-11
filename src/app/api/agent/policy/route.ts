@@ -9,6 +9,8 @@ import { getDeployPolicy, updateDeployPolicy, type DeployPolicy } from "@/lib/ag
 // the deploy-related per-user preferences remain.
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export const runtime = "nodejs";
 
 export async function GET() {

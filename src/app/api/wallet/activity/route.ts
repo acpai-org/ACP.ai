@@ -17,6 +17,7 @@ import {
 // (local signatures still render client-side).
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const revalidate = 0;
 export const dynamic = "force-dynamic";
 
 export interface WalletActivityDto {

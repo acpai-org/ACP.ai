@@ -33,9 +33,16 @@ export const DEFAULT_PROVIDER: AiProviderConfig = {
   temperature: 0.7,
   topP: 1,
   maxTokens: null,
-  showThinking: false,
+  showThinking: true,
   contextMessages: null,
 };
+
+/** Persisted-config version. v1 configs were saved while showThinking
+ * defaulted to false — the false in them is the old default, NOT a chosen
+ * "off" — so they upgrade to the new default (on) once. v2+ configs carry
+ * the user's actual choice and are respected verbatim. */
+const PERSIST_VERSION = 2;
+type PersistedProviderConfig = AiProviderConfig & { v?: number };
 
 function loadConfig(): AiProviderConfig {
   if (typeof window === "undefined") return { ...DEFAULT_PROVIDER };
@@ -47,7 +54,7 @@ function loadConfig(): AiProviderConfig {
     }
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const p = JSON.parse(raw) as Partial<AiProviderConfig>;
+      const p = JSON.parse(raw) as PersistedProviderConfig;
       // normalizeSampling: JSON round-trips can carry float dust
       // (0.699999988079071) — every read snaps values back to the grid.
       return normalizeSampling({
@@ -57,7 +64,7 @@ function loadConfig(): AiProviderConfig {
         temperature: typeof p.temperature === "number" ? p.temperature : DEFAULT_PROVIDER.temperature,
         topP: typeof p.topP === "number" ? p.topP : DEFAULT_PROVIDER.topP,
         maxTokens: typeof p.maxTokens === "number" ? p.maxTokens : null,
-        showThinking: p.showThinking === true,
+        showThinking: p.v === PERSIST_VERSION ? p.showThinking === true : true,
         contextMessages:
           typeof p.contextMessages === "number" && Number.isFinite(p.contextMessages) && p.contextMessages > 0
             ? Math.round(p.contextMessages)
@@ -70,7 +77,7 @@ function loadConfig(): AiProviderConfig {
 
 function saveConfig(config: AiProviderConfig) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...config, v: PERSIST_VERSION }));
 }
 
 /** The chat can send requests when a custom key is set. */

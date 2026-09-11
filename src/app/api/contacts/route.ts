@@ -5,6 +5,8 @@ import { db, ensureDb } from "@/db";
 import { contacts } from "@/db/schema";
 import { validateCreateContact } from "@/lib/payment";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function GET(request: Request) {
   ensureDb();
   const url = new URL(request.url);

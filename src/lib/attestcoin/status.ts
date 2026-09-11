@@ -7,11 +7,10 @@ import { attestcoinEndpoints, attestcoinEnv, SOURCE_CHAINS, type SourceChainInfo
 //
 // Reads the ChainInfo precompile (0x0FD3) on Creditcoin for the latest
 // attested height of each supported source chain and pairs it with the
-// source chain's own head to compute attestation lag. Results are cached
-// in memory for STATUS_TTL_MS (local-memory caching only, per project rules).
+// source chain's own head to compute attestation lag. Fetched fresh on
+// every call — caching is disabled app-wide, and attestation lag is exactly
+// the kind of mutable state a cached copy would freeze.
 // ─────────────────────────────────────────────────────────────────────────────
-
-const STATUS_TTL_MS = 30_000;
 
 export interface ChainStatus {
   chainKey: number;
@@ -39,8 +38,6 @@ export interface AttestcoinStatus {
   /** True when every upstream call succeeded. */
   healthy: boolean;
 }
-
-let cached: { status: AttestcoinStatus; at: number } | null = null;
 
 interface ProviderCache {
   env: string;
@@ -156,22 +153,18 @@ export async function fetchAttestcoinStatus(): Promise<AttestcoinStatus> {
   };
 }
 
-/** Cached status (30s TTL). Force a refresh by bypassing the TTL window. */
-export async function getAttestcoinStatus(force = false): Promise<AttestcoinStatus> {
-  if (!force && cached && Date.now() - cached.at < STATUS_TTL_MS) {
-    return cached.status;
-  }
-  const status = await fetchAttestcoinStatus();
-  cached = { status, at: Date.now() };
-  return status;
+/** Live status — fetched fresh on every call (the `force` argument is kept
+ * for call compatibility with the route's ?force=1 and is now a no-op). */
+export async function getAttestcoinStatus(_force = false): Promise<AttestcoinStatus> {
+  return fetchAttestcoinStatus();
 }
 
 // ── Attestation bounds (C2 / G6) ──────────────────────────────────────────────
 // getContinuityBounds(chainKey, height) returns the attestation/checkpoint
 // bracket around a height — the protocol-native answer to "why is my tx not
 // attested yet": the tx sits between bound n and the next bound m; once the
-// chain advances the bracket the tx flips to attested. Cached per
-// (chainKey, height) with a short TTL (bounds move as the chain advances).
+// chain advances the bracket the tx flips to attested. Fetched fresh —
+// isAttested flips for a given height, so a cached bracket can freeze it.
 
 export interface AttestationBounds {
   parentHeight: number;
@@ -183,11 +176,6 @@ export interface AttestationBounds {
   isAttested: boolean;
 }
 
-const BOUNDS_TTL_MS = 30_000;
-const globalForBounds = globalThis as unknown as {
-  __acpBoundsCache?: Map<string, { bounds: AttestationBounds; at: number }>;
-};
-
 /**
  * The attestation/checkpoint bracket around a source-chain height, plus
  * isAttested for the height itself (G6). Never throws — null on failure.
@@ -196,10 +184,6 @@ export async function getAttestationBounds(
   chainKey: number,
   height: number,
 ): Promise<AttestationBounds | null> {
-  const key = `${attestcoinEnv()}:${chainKey}:${height}`;
-  const cache = (globalForBounds.__acpBoundsCache ??= new Map());
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < BOUNDS_TTL_MS) return hit.bounds;
   const { chainInfo } = getProviders();
   const raw = await withTimeout(chainInfo.getContinuityBounds(chainKey, height), 10_000, null);
   if (!raw) return null;
@@ -212,11 +196,5 @@ export async function getAttestationBounds(
     childIsAttestation: raw.childIsAttestation,
     isAttested: raw.isAttested,
   };
-  cache.set(key, { bounds, at: Date.now() });
-  if (cache.size > 256) {
-    // Bounded cache — drop the oldest quarter.
-    const keys = [...cache.keys()].slice(0, 64);
-    for (const k of keys) cache.delete(k);
-  }
   return bounds;
 }

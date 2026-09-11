@@ -2,8 +2,9 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Client-side hook for the Attestcoin Protocol network status
-// (GET /api/attestcoin/status). Server caches 30s; the hook re-polls on a
-// longer interval and exposes manual refresh + last-known-state on error.
+// (GET /api/attestcoin/status). The server fetches fresh on every call; the
+// hook re-polls on an interval and exposes manual refresh + last-known-state
+// on error.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useRef, useState } from "react";

@@ -3,6 +3,8 @@ import { db, ensureDb } from "@/db/index";
 import { notifications } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },

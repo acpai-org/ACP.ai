@@ -5,6 +5,8 @@ import { db, ensureDb } from "@/db";
 import { recurringSchedules } from "@/db/schema";
 import { requeueRecurringSchedule } from "@/lib/recurring/fire";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },

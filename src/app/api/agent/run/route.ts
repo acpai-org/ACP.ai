@@ -13,6 +13,8 @@ import type { WalletContext } from "@/lib/ai/system-prompt";
 // interrupted in the action log (on-chain transactions complete independently).
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export const runtime = "nodejs";
 export const maxDuration = 300;
 

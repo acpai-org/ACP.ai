@@ -12,6 +12,8 @@ import { count, eq } from "drizzle-orm";
 // (it needs the rows) and pushes reconciled counts into the badge store.
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function GET() {
   try {
     ensureDb();

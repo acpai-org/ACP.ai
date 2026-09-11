@@ -26,6 +26,8 @@ function loadSkill(id: string) {
   return db.select().from(skills).where(eq(skills.id, id)).get();
 }
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function GET(_request: Request, { params }: Params) {
   ensureDb();
   const { id } = await params;

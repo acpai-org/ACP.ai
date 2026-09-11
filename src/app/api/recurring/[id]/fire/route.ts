@@ -9,6 +9,8 @@ import { fireRecurringSchedule } from "@/lib/recurring/fire";
 // if the subsequent agent dispatch loses a race with a busy run.
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export const runtime = "nodejs";
 
 interface RouteParams {

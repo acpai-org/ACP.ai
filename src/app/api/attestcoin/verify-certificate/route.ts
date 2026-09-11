@@ -6,6 +6,7 @@ import { verifyProofOnChain } from "@/lib/attestcoin/verify";
 import { decodeTxBytes } from "@/lib/attestcoin/decode";
 import { getAttestcoinStatus } from "@/lib/attestcoin/status";
 
+export const revalidate = 0;
 export const dynamic = "force-dynamic";
 
 // ─────────────────────────────────────────────────────────────────────────────

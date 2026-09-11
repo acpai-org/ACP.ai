@@ -13,6 +13,7 @@ import {
   type BatchSubmitGroup,
 } from "@/lib/attestcoin/submit";
 
+export const revalidate = 0;
 export const dynamic = "force-dynamic";
 
 /**

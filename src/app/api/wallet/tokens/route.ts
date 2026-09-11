@@ -17,6 +17,7 @@ import {
 // the UI as source:"known".
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const revalidate = 0;
 export const dynamic = "force-dynamic";
 
 export interface WalletTokenDto {

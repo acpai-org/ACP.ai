@@ -4,13 +4,14 @@ import { attestcoinEndpoints } from "@/lib/attestcoin/config";
 import { getPollerStats } from "@/lib/attestcoin/poller";
 import { submissionAvailability } from "@/lib/attestcoin/submit";
 
+export const revalidate = 0;
 export const dynamic = "force-dynamic";
 
 /**
  * Live Attestcoin Protocol network status: the Creditcoin block height plus,
  * per supported source chain, the latest attested height/hash and the lag
- * against the source chain head. Cached in memory for 30s.
- * `?force=1` bypasses the cache.
+ * against the source chain head. Fetched fresh on every call (no cache).
+ * `?force=1` is accepted for compatibility and is a no-op.
  *
  * The response also carries `poller` (server-side attestation watcher
  * liveness: how many payments it is watching, last tick, flips so far) and

@@ -5,6 +5,8 @@ import { listActions } from "@/lib/agent/action-log";
 // Every action the agent took or attempted, with proof/tx references.
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {

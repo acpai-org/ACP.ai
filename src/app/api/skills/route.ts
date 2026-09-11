@@ -27,6 +27,8 @@ function asTrimmedString(v: unknown): string | null {
   return typeof v === "string" ? v.trim() : null;
 }
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function GET() {
   ensureDb();
   const rows = db.select().from(skills).all();

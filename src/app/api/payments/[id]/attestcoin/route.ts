@@ -11,6 +11,7 @@ import { decodeTxBytes } from "@/lib/attestcoin/decode";
 import { submissionAvailability } from "@/lib/attestcoin/submit";
 import { VIEM_CHAINS, getChainByChainId } from "@/lib/chains/registry";
 
+export const revalidate = 0;
 export const dynamic = "force-dynamic";
 
 interface RouteParams {

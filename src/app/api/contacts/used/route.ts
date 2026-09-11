@@ -12,6 +12,8 @@ import { isAddress } from "viem";
 // means a real payment, not a favorite toggle or a creation.
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export async function POST(request: Request) {
   ensureDb();
 
