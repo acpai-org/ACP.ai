@@ -274,7 +274,7 @@ When new chains get attestor coverage, ACP.ai picks them up automatically. the e
 
 ### Prerequisites
 
-- bun for installation
+- Node.js ≥ 24 (the SQLite driver is Node's built-in `node:sqlite` — no native module to compile)
 - A wallet (MetaMask, TrustWallet, etc.), preferably funded with tCTC (test CTC) or for mainnet, real CTC.<br>
   based on whether you want to use the signing on Attestcoin.
 - An AI provider API key (ChatGPT, Z.ai, Kimi or any OpenAI-compatible endpoint)
@@ -283,7 +283,7 @@ Run this in a terminal (Git Recommended. Use termux for android.)
 
 ```
 git clone https://github.com/acpai-org/ACP.ai/
-bun install
+npm install
 ```
 Now must set the .env and after that, build, and then you are set to go.
 
@@ -301,8 +301,8 @@ Your .env should have these settings.
 
 Lastly, simply built and run the app with:
 ```
-bun run build
-bun run start
+npm run build
+npm run start
 ```
 
 
@@ -517,9 +517,12 @@ the fixed on-chain rate. A single number is never reused across chains.
 
 ### 5. Data layer (`src/db/`)
 
-drizzle-orm over better-sqlite3. The database file is created and migrated
+drizzle-orm over Node's built-in SQLite (`node:sqlite`, via the custom
+sync driver in `src/db/node-sqlite-driver.ts` — no third-party native
+modules, so `npm install` never needs node-gyp or prebuilt binaries). The
+database file is created and migrated
 at runtime by `ensureDb()` in `src/db/index.ts` using idempotent DDL, so
-`bun run db:push` is a no-op by design. Default path `./sqlite.db`,
+`npm run db:push` is a no-op by design. Default path `./sqlite.db`,
 overridable with `ACP_DB_PATH`.
 
 Eight tables:
@@ -553,9 +556,9 @@ transactions use the base-unit string, so there is no float drift.
 | `models/` | route | model listing for the provider form |
 | `notifications/` | route, `[id]`, `mark-all-read`, `unread-count` | inbox plus the badge feed (count only) |
 
-All routes use the Node runtime (better-sqlite3 is native). The agent's
-model calls proxy the browser-supplied key per run; nothing secret is
-persisted server-side.
+All routes use the Node runtime (`node:sqlite` and the agent toolchain are
+Node-only). The agent's model calls proxy the browser-supplied key per run;
+nothing secret is persisted server-side.
 
 ### 7. Frontend architecture
 
@@ -627,9 +630,9 @@ four files at test time. ~1,090 keys, fully translated.
 
 ### 8. Build and operations
 
-- **Dev**: `bun run dev` runs `next dev --turbopack -p 3000`. Memory is
+- **Dev**: `npm run dev` runs `next dev --turbopack -p 3000`. Memory is
   bounded with `MALLOC_ARENA_MAX=2` and `--max_old_space_size=2048`.
-- **Testing**: `bun run test` runs 110 tests: agent-loop behavior,
+- **Testing**: `npm run test` runs 110 tests: agent-loop behavior,
   fund-safety invariants, contract compilation to bytecode, recurring-fire
   timing, skills seeding and versioning, the Attestcoin pipeline, and a
   tool-coverage suite asserting that every registry tool parses its sample,

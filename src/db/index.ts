@@ -1,10 +1,10 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
-import Database from "better-sqlite3";
-import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
+import { drizzle, type NodeSqliteDatabase } from "@/db/node-sqlite-driver";
 import { contacts, payments, notifications, recurringSchedules, agentSettings, agentActions, skills, automationRules } from "@/db/schema";
 
-export type AppDatabase = BetterSQLite3Database<{
+export type AppDatabase = NodeSqliteDatabase<{
   contacts: typeof contacts;
   payments: typeof payments;
   notifications: typeof notifications;
@@ -17,19 +17,21 @@ export type AppDatabase = BetterSQLite3Database<{
 
 // DB path: overridable via ACP_DB_PATH (tests isolate their DB this way —
 // chdir would break the contracts/ compile service's relative paths).
-const DB_PATH = process.env.ACP_DB_PATH ?? (process.env.VERCEL ? "/tmp/sqlite.db" : path.join(process.cwd(), "sqlite.db"));
+// Serverless hosts (Vercel, Netlify) only give each function a writable
+// /tmp — point the file there (data lifetime follows the platform's rules).
+const DB_PATH = process.env.ACP_DB_PATH ?? (process.env.VERCEL || process.env.NETLIFY ? "/tmp/sqlite.db" : path.join(process.cwd(), "sqlite.db"));
 
 const globalForDb = globalThis as unknown as {
-  __sqlite?: Database.Database;
+  __sqlite?: DatabaseSync;
   __db?: AppDatabase;
 };
 
 const sqlite =
   globalForDb.__sqlite ??
   (() => {
-    const instance = new Database(DB_PATH);
-    instance.pragma("journal_mode = WAL");
-    instance.pragma("foreign_keys = ON");
+    const instance = new DatabaseSync(DB_PATH);
+    instance.exec("PRAGMA journal_mode = WAL");
+    instance.exec("PRAGMA foreign_keys = ON");
     // D11 (Node 24 teardown race): Statements prepared by ensureDb() become
     // garbage immediately; if GC hasn't reclaimed them by process exit, their
     // native destructors run AFTER environment teardown started and crash
@@ -263,24 +265,24 @@ export function ensureDb(): void {
   // no enabled state could have been user-set — flipping the stale default is
   // honest, not an override. Guarded by PRAGMA user_version so it runs exactly
   // once per database file; later user choices are never clobbered.
-  if ((sqlite.pragma("user_version", { simple: true }) as number) < 1) {
+  if ((sqlite.prepare("PRAGMA user_version").get() as { user_version: number }).user_version < 1) {
     sqlite
       .prepare("UPDATE skills SET enabled = 1 WHERE builtin = 1 AND enabled = 0")
       .run();
-    sqlite.pragma("user_version = 1");
+    sqlite.exec("PRAGMA user_version = 1");
   }
   // P17.2 one-time data migration (schema version 2): recurring schedules
   // created through the AGENT tool (Phase ≤3) stored createdAt in epoch
   // SECONDS while every other writer (and the view's formatter) uses epoch
   // MILLISECONDS — those rows rendered as fake "Jan 21, 1970" dates. Seconds
   // values are unambiguous (< 1e12 for any realistic epoch), so multiply once.
-  if ((sqlite.pragma("user_version", { simple: true }) as number) < 2) {
+  if ((sqlite.prepare("PRAGMA user_version").get() as { user_version: number }).user_version < 2) {
     sqlite
       .prepare(
         "UPDATE recurring_schedules SET created_at = created_at * 1000 WHERE created_at > 0 AND created_at < 1000000000000",
       )
       .run();
-    sqlite.pragma("user_version = 2");
+    sqlite.exec("PRAGMA user_version = 2");
   }
   seedBuiltinSkills();
 

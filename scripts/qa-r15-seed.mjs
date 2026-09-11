@@ -1,13 +1,12 @@
 // R15 live-verification seed: 2 contacts + 4 payments (settled USDC + settled
 // ETH so the payments-page settled-total chips show two tokens) + 3
 // notifications with relatedPaymentId (deep-link View-payment test). Run with
-// node (bun NAPI crash with better-sqlite3 — known). Rows carry the QA marker
-// "R15QA" so the cleanup pass deletes exactly what this script inserted.
-import Database from "better-sqlite3";
+// node. Rows carry the QA marker "R15QA" so the cleanup pass deletes exactly
+// what this script inserted.
+import { openDb, runInTransaction } from "./qa-node-sqlite.mjs";
 import { randomUUID } from "node:crypto";
 
-const db = new Database(process.argv[2] ?? "sqlite.db");
-db.pragma("journal_mode = WAL");
+const db = openDb(process.argv[2]);
 
 const now = Date.now();
 const A = "0x9f8a7B6c5D4e3F2a1B0c9D8e7F6a5B4c3D2e1F0a";
@@ -47,12 +46,11 @@ const insN = db.prepare(
   "INSERT INTO notifications (id, title, message, type, read, related_payment_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 );
 
-const tx = db.transaction(() => {
+runInTransaction(db, () => {
   for (const c of contacts) insC.run(c.id, c.label, c.address, c.note, c.favorite, c.lastUsed);
   for (const p of payments) insP.run(p.id, p.label, p.addr, p.token, p.amount, p.base, p.status, p.tx, p.createdAt, p.status === "settled" ? p.createdAt + 60_000 : null);
   for (const n of notifications) insN.run(n.id, n.title, n.message, n.type, n.read, n.rel, n.createdAt);
 });
-tx();
 
 console.log("seeded:", {
   contacts: contacts.length,

@@ -1,10 +1,10 @@
 // Raw-sqlite test helpers for the F9 seed-versioning suite. Opens a SECOND
 // connection to the same temp DB (ACP_DB_PATH) so the tests can inspect and
 // tamper with rows exactly as an app restart would see them.
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 
-const db = new Database(process.env.ACP_DB_PATH);
-db.pragma("journal_mode = WAL");
+const db = new DatabaseSync(process.env.ACP_DB_PATH);
+db.exec("PRAGMA journal_mode = WAL");
 // D11: finalize statements before env teardown (same Node 24 crash class as
 // src/db/index.ts — second connection, same fix).
 process.on("exit", () => {

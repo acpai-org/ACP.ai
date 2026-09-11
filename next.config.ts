@@ -40,7 +40,9 @@ const nextConfig: NextConfig = {
   // `export const instant` opt-outs were removed from pages/layout.
   cacheComponents: false,
   reactCompiler: true,
-  serverExternalPackages: ["better-sqlite3", "drizzle-orm"],
+  // node:sqlite is a Node builtin (automatically external); drizzle-orm stays
+  // external so the server bundle imports it from node_modules at runtime.
+  serverExternalPackages: ["drizzle-orm"],
   productionBrowserSourceMaps: false,
   compress: true,
   generateEtags: false,

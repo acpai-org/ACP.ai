@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "npm@11.19.0",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "MALLOC_ARENA_MAX=2 NODE_OPTIONS=--max_old_space_size=2048 next dev --turbopack -p 3000 2>&1 | tee dev.log",
     "build": "MALLOC_ARENA_MAX=2 NODE_OPTIONS=--max_old_space_size=2560 next build --turbopack",
@@ -19,7 +22,6 @@
     "@reown/appkit-adapter-wagmi": "^1.8.21",
     "@tanstack/react-query": "^5.101.2",
     "@web3icons/react": "^4.1.21",
-    "better-sqlite3": "13.0.3",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
@@ -39,9 +41,8 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/canvas-confetti": "^1.9.0",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "^1.0.0",
@@ -52,7 +53,6 @@
     "typescript": "^5"
   },
   "trustedDependencies": [
-    "@reown/appkit",
-    "better-sqlite3"
+    "@reown/appkit"
   ]
 }
