@@ -70,8 +70,13 @@ export function useAttestcoinStatus() {
           : { phase: "loading" },
     );
     try {
+      // N9 fix: bound the request — an unreachable /api/attestcoin/status
+      // (server-side eth_calls to Creditcoin) could hang the fetch forever,
+      // permanently pinning inFlight and freezing the 60s interval AND the
+      // manual Refresh button for the page's lifetime.
       const res = await fetch(`/api/attestcoin/status${force ? "?force=1" : ""}`, {
         cache: "no-store",
+        signal: AbortSignal.timeout(20_000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as AttestcoinStatusData;

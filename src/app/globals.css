@@ -79,9 +79,14 @@
 
   --tight-bg: rgba(0, 0, 0, 0.5);
 
-  --item-bg: rgba(255, 255, 255, 0.02);
-  --item-border: rgba(255, 255, 255, 0.04);
-  --item-bg-hover: rgba(255, 255, 255, 0.04);
+  /* S12-b (round-7, VLM-guided): inactive glass-item chips read as plain
+   * text in dark mode at the old 2% bg / 4% border — doubled both so every
+   * inactive filter chip (actions view, payments attest lens, chain chips)
+   * carries a perceptible resting fill + edge. Hover step moved up
+   * accordingly so it still pops one notch above rest. */
+  --item-bg: rgba(255, 255, 255, 0.045);
+  --item-border: rgba(255, 255, 255, 0.09);
+  --item-bg-hover: rgba(255, 255, 255, 0.08);
   --item-border-hover: rgba(34, 211, 238, 0.22);
 
   --neu-bg-color: #121212;
@@ -253,8 +258,25 @@
   }
 }
 
-* {
-  border-color: var(--color-border);
+/* S12-h (round-7, ROOT-CAUSE FIX, VLM-guided): this reset used to sit
+   UNLAYERED at the top of the file — and unlayered CSS beats every @layer
+   rule regardless of specificity. That silently overrode ALL layered
+   border-color declarations in the app: every Tailwind border utility
+   (border-transparent, border-primary/25, border-foreground/10,
+   border-danger/30, hover:border-*, ...) and the component-layer borders
+   (.glass-item's designed --item-border, .neumorphic-field's 45% mix).
+   Live-verified before the fix: a secondary Button with border-transparent
+   and the contact chip with border-primary/25 BOTH computed rgb(28,28,28)
+   — every bordered element rendered the same near-invisible edge in dark
+   mode, which is why rounds 4-6 kept "fixing" invisible borders with ring
+   (box-shadow) recipes. Moving the reset into the base layer restores the
+   standard Tailwind cascade: a bare `border` (width) utility still picks
+   up the theme border color from here, while explicit border-color
+   utilities and component borders win as designed. */
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
 }
 
 button, a, [role="button"], input, select, textarea, label, summary {

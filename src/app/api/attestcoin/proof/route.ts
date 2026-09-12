@@ -65,7 +65,10 @@ export async function GET(request: Request) {
   if (outcome.state === "proof" && outcome.proof) {
     cost = proofCostContext(outcome.proof, chainRow?.attestedHeight ?? null);
     if (raw?.txBytes) decoded = await decodeTxBytes(raw.txBytes, txHash);
-  } else if (outcome.state === "pending") {
+  } else if (outcome.state === "pending" || outcome.state === "unknown_tx") {
+    // N2: unknown_tx (builder 404 — tx known but not attested yet) gets the
+    // same attestation-bounds enrichment as pending, so the UI can still show
+    // how far behind the attested head the tx's block is.
     try {
       const viemChain = VIEM_CHAINS[chain.evmChainId];
       const registryChain = getChainByChainId(chain.evmChainId);

@@ -31,6 +31,11 @@ const sqlite =
   (() => {
     const instance = new DatabaseSync(DB_PATH);
     instance.exec("PRAGMA journal_mode = WAL");
+    // D12 fix: WAL without a busy timeout throws SQLITE_BUSY IMMEDIATELY when
+    // a second writer holds the lock (test scripts, qa seeds, dev restart
+    // races) — node:sqlite's default busy_timeout is 0. 5s is the standard
+    // pairing with WAL: writers queue instead of erroring.
+    instance.exec("PRAGMA busy_timeout = 5000");
     instance.exec("PRAGMA foreign_keys = ON");
     // D11 (Node 24 teardown race): Statements prepared by ensureDb() become
     // garbage immediately; if GC hasn't reclaimed them by process exit, their

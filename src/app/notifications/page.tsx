@@ -408,10 +408,11 @@ export default function NotificationsPage() {
           icon={<Bell className="h-4 w-4" />}
           iconClassName={unreadCount > 0 ? "text-primary" : undefined}
         />
-        <StatCard label={t("notifications.total")} value={`${notifications.length}`} />
+        <StatCard label={t("notifications.total")} value={`${notifications.length}`} icon={<Inbox className="h-4 w-4" />} />
         <StatCard
           label={t("notifications.paymentAlerts")}
           value={`${notifications.filter((n) => n.type === "payment").length}`}
+          icon={<Receipt className="h-4 w-4" />}
           className="col-span-2 sm:col-span-1"
         />
       </div>
@@ -435,7 +436,11 @@ export default function NotificationsPage() {
                   "flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium transition-colors cursor-pointer",
                   active
                     ? "bg-primary/15 text-primary ring-1 ring-primary/30"
-                    : "text-muted-2 hover:bg-surface-2 hover:text-foreground ring-1 ring-border/60",
+                    // S12-e (round-7 styling, VLM-guided): unified with the
+                    // payments/actions chip language — the old ring-border/60
+                    // (#1c1c1c @60%) edge was invisible in dark mode, and
+                    // glass-item now carries a perceptible fill + edge.
+                    : "glass-item text-muted hover:text-foreground",
                 )}
               >
                 {f === "all" ? t("notifications.filterAll") : t(typeConfig[f].labelKey)}

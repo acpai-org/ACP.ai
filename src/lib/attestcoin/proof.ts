@@ -75,10 +75,26 @@ function toNumber(v: number | string | undefined): number | null {
 export async function getTxProof(chainKey: number, txHash: string): Promise<ProofOutcome> {
   const { proofBuilderUrl } = attestcoinEndpoints();
   const builder = new proofProvider.service.ProofBuilder(chainKey, proofBuilderUrl);
+  // N2 fix (error honesty): the SDK's getProof does NOT throw on HTTP/network
+  // failures — it returns { success:false, error:"… AxiosError … status code
+  // 404 …" }. The old catch-block classification below was therefore DEAD
+  // CODE: every failure (builder outage, DNS failure, 5xx) mapped to
+  // "pending", masking real outages as "not attested yet". Classify from the
+  // returned error string instead:
+  //   • 404 / not found / unknown → "unknown_tx" (tx not found / not attested
+  //     yet — the honest retry-later state)
+  //   • anything else → "error" (a real failure — surfaces as 502, retries
+  //     with backoff, poller marks lastError)
   try {
     const result = await builder.getProof(txHash);
     if (!result.success || !result.data) {
-      return { ok: false, state: "pending", detail: result.error ?? "proof not available yet" };
+      const msg = result.error ?? "proof not available";
+      const unknownTx = /404|not found|unknown|no proof|not attested/i.test(msg);
+      return {
+        ok: false,
+        state: unknownTx ? "unknown_tx" : "error",
+        detail: msg,
+      };
     }
     const d = result.data as unknown as RawProofData;
     const generatedAt =

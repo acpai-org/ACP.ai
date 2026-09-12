@@ -168,7 +168,7 @@ async function driveRun(opts: DriveOptions): Promise<DriveOutcome> {
         if (evt.type === "confirmation_request" && !answered.has(`conf:${evt.request.callId}`)) {
           answered.add(`conf:${evt.request.callId}`);
           confirmationsSeen.n++;
-          resolveResponse(opts.sessionId, evt.request.callId, {
+          resolveResponse(opts.sessionId, evt.request.callId, "confirmation", {
             approved: opts.confirmations === "approve",
           });
         }
@@ -207,7 +207,7 @@ async function driveRun(opts: DriveOptions): Promise<DriveOutcome> {
                         txHash: "0x" + "ab".repeat(32),
                         chainId: typeof evt.args.chain === "number" ? evt.args.chain : undefined,
                       };
-          resolveResponse(opts.sessionId, evt.callId, result);
+          resolveResponse(opts.sessionId, evt.callId, "tool", result);
         }
       }
       if (r === "done") break;

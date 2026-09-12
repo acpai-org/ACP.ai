@@ -1,4 +1,3 @@
-
 <p align="center">
   <img src="./public/pics/acpai.png" width="700" />
 </p>
@@ -18,6 +17,7 @@
 </div>
 
 ## Table of Contents
+
 - [ACP.ai](#acpai---attested-credit-protocol)
   - [Why Attestcoin](#but-why-attestcoin)
   - [What the agent does](#what-the-agent-does-with-attestcoin)
@@ -31,33 +31,30 @@
 - [Protocol correctness](#protocol-correctness-details-the-things-that-bite-if-you-skip-them)
 - [Scope & roadmap](#scope--roadmap)
 
-
 > [!NOTE]
 > The demo video will be ready in a few days. For now, the project is deployed on web in beta form.
-> Link URL (beta): https://acp-ai.vercel.app/ (Fallback: https://acp-ai.netlify.app)<br>
+> Link URL (beta): https://acp-ai.vercel.app<br>
 > The Track tracks for this project are the DeFi/AI Track.<br>
 > Low commits are because local commits have been excluded.
 
 # ACP.ai - Attested Credit Protocol
-This project was built with the goal of simplifying the world of web2/web3 for crypto enthusiasts. Doesn't matter if you are a complete beginner, know some stuff about crypto or are an advanced professional; this project is for anyone who is brave enough to step into the world of crypto.
 
+This project was built with the goal of simplifying the world of web2/web3 for crypto enthusiasts. Doesn't matter if you are a complete beginner, know some stuff about crypto or are an advanced professional; this project is for anyone who is brave enough to step into the world of crypto.
 
 And there is always a gap between the current LLMs and the applications you use. And we closed that for crypto.
 
-
 Say you want to make an entire token and deploy it on-chain, write a complex contract that does something big you have in mind. You can always use ChatGPT or its competitors, but it's truly a deep hassle for a beginner and time consuming for the normal person. Hallucinations, outdated data, etc. All of that will stop you before long. important to mention, ACP.ai narrows this risk rather than claiming to eliminate it: user-enabled skills constrain what patterns the model draws on when generating a contract, and every deployment — template or custom — passes through a mandatory confirmation card before anything is signed.
-
 
 Or maybe you just want to automate something. Set up conditional actions. Say you wanted to, for instance, every Saturday, swap a specific token and instantly send it to an address. Or if you spend too much of something, you wanna get reminded you are spending too much.
 With our application, you can set all that up in mere seconds. You're in control of everything.
-
 
 And that raises another problem. What if you want to prove what you did? And that is where Attestcoin enters.
 
 Attestcoin is not a feature of ACP.ai. ACP.ai is an application of Attestcoin. Every cross-chain fact the agent reasons about, every fund release it executes, and every proof a user exports is gated by on-chain verification on Creditcoin. no centralized oracle operator, no "trust us," no screenshots.
 
 ### But why Attestcoin?
-A transaction hash is not proof. It's like a pointer - a promise that if you go look, you *might* just find something. Screenshots can be faked, databases can be edited. Basically, it is not a proof.
+
+A transaction hash is not proof. It's like a pointer - a promise that if you go look, you _might_ just find something. Screenshots can be faked, databases can be edited. Basically, it is not a proof.
 
 Independent attestors on the Creditcoin network continuously attest source-chain block headers. From those attestations, anyone can generate two proofs for any transaction: a Merkle proof (the tx is in a specific block) and a continuity proof (that block is part of the real, finalized source chain). Any contract on Creditcoin can then verify those proofs synchronously on-chain through the Block Prover Precompile (0x…0FD2) — native runtime code, not an oracle operator, not our servers, not an LLM's guess.
 
@@ -65,8 +62,7 @@ One subtlety the docs insist on, and which we implement deliberately: the precom
 
 Proof generation uses the protocol's hosted Proof Builder; proof verification runs on the Creditcoin chain itself. We never ask users to trust us — we hand them proofs the chain checks.
 
-
-ACP.ai wires the whole protocol into your actions, automatically. With certificates that anyone can verify (Export any verified payment as a certificate or QR code). 
+ACP.ai wires the whole protocol into your actions, automatically. With certificates that anyone can verify (Export any verified payment as a certificate or QR code).
 
 ### What the agent does with Attestcoin
 
@@ -74,7 +70,7 @@ ACP.ai wires the whole protocol into your actions, automatically. With certifica
    Attestcoin Smart Contract (ASC) we wrote and the agent deploys — escrows tCTC on
    Creditcoin and pays the beneficiary **only** when a Merkle + continuity proof of the
    condition transaction (a payment on Sepolia, an ERC-20 transfer, …) passes the Block
-   Prover Precompile (`0x…0FD2`) *inside the same transaction*. Verification and release
+   Prover Precompile (`0x…0FD2`) _inside the same transaction_. Verification and release
    are atomic: there is no state where "verified but not released" can get stuck, and
    no state where funds move without the precompile accepting the proof.
 2. **Cross-chain swaps, proof-gated on both legs.** ETH locks in `CrossChainSwapSource.sol`
@@ -84,7 +80,7 @@ ACP.ai wires the whole protocol into your actions, automatically. With certifica
    and the rate fixed at lock time.
 3. **Autonomous attestation-aware decisions.** The agent's
    closed 28-tool registry includes 11 Attestcoin tools — it can check attestation
-   status, *wait* for a block to be attested, decode a proven transaction, verify a
+   status, _wait_ for a block to be attested, decode a proven transaction, verify a
    proof read-only, estimate verification cost, and submit proofs on-chain — so
    cross-chain reasoning runs on **cryptographically verified data, not model guesses**.
 4. **Attestation-driven automation.** The automation engine's `attestation_ready`
@@ -97,26 +93,23 @@ ACP.ai wires the whole protocol into your actions, automatically. With certifica
    verification, and decoded receipt status. Every check re-queries the chain; nothing
    is trusted from the certificate itself.
 
-
-
 ### Protocol surface coverage
 
-| Attestcoin primitive | Where ACP.ai uses it |
-|---|---|
-| Official SDK — `@gluwa/usc-sdk` | all of `src/lib/attestcoin/` |
-| Proof Builder `getProof` / `getBatchProof` | `proof.ts`, `batch.ts` — per-tx and batch (shared continuity, ≤10 txs/call) |
-| Block Prover Precompile `0x0FD2` — **read** | `verify.ts` (`verifySingle`, `verifyBatch` as read-only `eth_call`, no signer) — the poller, the proof routes, the certificate verifier |
-| Block Prover Precompile `0x0FD2` — **write** | `submit.ts` (`verifyAndEmitSingle` / `verifyAndEmitBatch` as signed Creditcoin txs; `TransactionVerified(chainKey, height, transactionIndex)` events parsed from receipts) |
-| ChainInfo Precompile `0x0FD3` | `chains.ts` — live `getSupportedChains()`; evmChainId↔chainKey map is runtime-derived (mainnet-correct), never hardcoded |
-| EvmV1Decoder contract | `decode.ts` — decodes from/to/value/receipt/logs *from the proven tx bytes* on Creditcoin |
-| ASCs (Attestcoin Smart Contracts) | `contracts/ConditionalRelease.sol`, `contracts/CrossChainSwapDestination.sol` — built on the vendored `INativeQueryVerifier` interface, byte-identical to the precompile's |
-| Source-chain contract pattern | `contracts/CrossChainSwapSource.sol` — minimal logic, emits `Locked` events (the docs' best-practice shape) |
-| Off-chain Readability Worker pattern | the 60s attestation poller (`poller.ts`): waits for attestation, fetches proofs, chunks to protocol limits, merges continuity proofs, falls back per-tx, fires notifications |
-| Protocol batch limits (≤10 proofs, <1000-block span) | `batch.ts: chunkByProtocolLimits` — unit-tested against the limits |
-| Continuity-merge semantics | `batch.ts: tryMergeProofs` — abutting/overlapping ranges merge; a gap degrades to per-tx (correctness over batching) |
-| Receipt-status gate (docs: ASCs MUST check it) | `EvmV1Decoder` in both ASCs + `decode.ts` + certificate check #5 |
-| Verification gas economics | docs formula `≈ 2.3e-5 + 2.9e-7 × continuity-roots CTC` in `proof.ts`, stale-proof awareness (10–100× penalty), gas-as-%-of-block in `submit.ts` |
-
+| Attestcoin primitive                                 | Where ACP.ai uses it                                                                                                                                                         |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Official SDK — `@gluwa/usc-sdk`                      | all of `src/lib/attestcoin/`                                                                                                                                                 |
+| Proof Builder `getProof` / `getBatchProof`           | `proof.ts`, `batch.ts` — per-tx and batch (shared continuity, ≤10 txs/call)                                                                                                  |
+| Block Prover Precompile `0x0FD2` — **read**          | `verify.ts` (`verifySingle`, `verifyBatch` as read-only `eth_call`, no signer) — the poller, the proof routes, the certificate verifier                                      |
+| Block Prover Precompile `0x0FD2` — **write**         | `submit.ts` (`verifyAndEmitSingle` / `verifyAndEmitBatch` as signed Creditcoin txs; `TransactionVerified(chainKey, height, transactionIndex)` events parsed from receipts)   |
+| ChainInfo Precompile `0x0FD3`                        | `chains.ts` — live `getSupportedChains()`; evmChainId↔chainKey map is runtime-derived (mainnet-correct), never hardcoded                                                     |
+| EvmV1Decoder contract                                | `decode.ts` — decodes from/to/value/receipt/logs _from the proven tx bytes_ on Creditcoin                                                                                    |
+| ASCs (Attestcoin Smart Contracts)                    | `contracts/ConditionalRelease.sol`, `contracts/CrossChainSwapDestination.sol` — built on the vendored `INativeQueryVerifier` interface, byte-identical to the precompile's   |
+| Source-chain contract pattern                        | `contracts/CrossChainSwapSource.sol` — minimal logic, emits `Locked` events (the docs' best-practice shape)                                                                  |
+| Off-chain Readability Worker pattern                 | the 60s attestation poller (`poller.ts`): waits for attestation, fetches proofs, chunks to protocol limits, merges continuity proofs, falls back per-tx, fires notifications |
+| Protocol batch limits (≤10 proofs, <1000-block span) | `batch.ts: chunkByProtocolLimits` — unit-tested against the limits                                                                                                           |
+| Continuity-merge semantics                           | `batch.ts: tryMergeProofs` — abutting/overlapping ranges merge; a gap degrades to per-tx (correctness over batching)                                                         |
+| Receipt-status gate (docs: ASCs MUST check it)       | `EvmV1Decoder` in both ASCs + `decode.ts` + certificate check #5                                                                                                             |
+| Verification gas economics                           | docs formula `≈ 2.3e-5 + 2.9e-7 × continuity-roots CTC` in `proof.ts`, stale-proof awareness (10–100× penalty), gas-as-%-of-block in `submit.ts`                             |
 
 ### The end-to-end flow (payment → proof → certificate → release)
 
@@ -146,12 +139,11 @@ ACP.ai wires the whole protocol into your actions, automatically. With certifica
         → precompile verify() + receiptStatus==1 + conditions → atomic payout
 ```
 
-*(This is the official dApp design pattern from the Attestcoin docs — source-chain
+_(This is the official dApp design pattern from the Attestcoin docs — source-chain
 contract → off-chain worker → Proof Builder → ASC → precompile — with the agent
-orchestrating steps a human would otherwise do manually.)*
+orchestrating steps a human would otherwise do manually.)_
 
 ## Features
-
 
 - **Attestcoin-native agent** — 11 of the 28 closed-registry tools are Attestcoin tools
   (attestation status, wait-for-attestation, decode, verify, estimate cost, submit proof,
@@ -195,7 +187,7 @@ what this app will never do:
 
 ## Screenshots
 
-How our project's overall UI currently looks like. 
+How our project's overall UI currently looks like.
 
 <details>
 <summary><b>Screenshots</b></summary>
@@ -206,6 +198,7 @@ How our project's overall UI currently looks like.
 <br>
 
 ### Homepage
+
 This is the main page where users can talk with the Agent.
 
 <p align="center">
@@ -227,6 +220,7 @@ This is the main page where users can talk with the Agent.
 <br>
 
 ### Homepage
+
 This is the main page where users can talk with the Agent.
 
 <p align="center">
@@ -243,30 +237,29 @@ This is the main page where users can talk with the Agent.
 
 </details>
 
-
 ## Supported Chains
 
 Wallet actions (transfers, swaps, deployments)
 
-| Chain | ID |
-|---|---|
-| Creditcoin Testnet (CC3) | 102031 |
-| Creditcoin Mainnet (CC3) | 102030 |
-| Ethereum Sepolia | 11155111 |
-| Ethereum | 1 |
-| BNB Smart Chain | 56 |
-| Base | 8453 |
-| Arbitrum One | 42161 |
-| Optimism | 10 |
-| Polygon | 137 |
+| Chain                    | ID       |
+| ------------------------ | -------- |
+| Creditcoin Testnet (CC3) | 102031   |
+| Creditcoin Mainnet (CC3) | 102030   |
+| Ethereum Sepolia         | 11155111 |
+| Ethereum                 | 1        |
+| BNB Smart Chain          | 56       |
+| Base                     | 8453     |
+| Arbitrum One             | 42161    |
+| Optimism                 | 10       |
+| Polygon                  | 137      |
 
 Attestation coverage (what the Attestcoin attestor network actually attests today — per the ChainInfo precompile 0x0FD3, which we query live):
 
-| Environment | Attested chain | chainKey | Genesis |
-|---|---|---|---|
-| CC3 Testnet | Ethereum Sepolia | 1 | 0 |
-| CC3 Testnet | Ethereum Mainnet | 3 | 0 |
-| CC3 Mainnet | Ethereum | 1 | 0 |
+| Environment | Attested chain   | chainKey | Genesis |
+| ----------- | ---------------- | -------- | ------- |
+| CC3 Testnet | Ethereum Sepolia | 1        | 0       |
+| CC3 Testnet | Ethereum Mainnet | 3        | 0       |
+| CC3 Mainnet | Ethereum         | 1        | 0       |
 
 When new chains get attestor coverage, ACP.ai picks them up automatically. the evmChainId↔chainKey mapping is derived at runtime from the ChainInfo precompile (src/lib/attestcoin/chains.ts), never hardcoded, because chainKey assignments differ between testnet and mainnet and a stale map would query the wrong chain.
 
@@ -274,7 +267,7 @@ When new chains get attestor coverage, ACP.ai picks them up automatically. the e
 
 ### Prerequisites
 
-- Node.js ≥ 24 (the SQLite driver is Node's built-in `node:sqlite` — no native module to compile)
+- Node.js ≥ 24
 - A wallet (MetaMask, TrustWallet, etc.), preferably funded with tCTC (test CTC) or for mainnet, real CTC.<br>
   based on whether you want to use the signing on Attestcoin.
 - An AI provider API key (ChatGPT, Z.ai, Kimi or any OpenAI-compatible endpoint)
@@ -285,26 +278,30 @@ Run this in a terminal (Git Recommended. Use termux for android.)
 git clone https://github.com/acpai-org/ACP.ai/
 npm install
 ```
+
 Now must set the .env and after that, build, and then you are set to go.
 
-Run ```cp .env.example .env```, open .env and do these:
+Run `cp .env.example .env`, open .env and do these:
+
 ```
 NEXT_PUBLIC_WC_PROJECT_ID=efee3824eaa92fa34351c5d64ce0ecef  # Default; do not touch unless you want to use your own.
 ATTESTCOIN_NETWORK=testnet    # Or use mainnet
 CREDITCOIN_SIGNER_KEY=<a tCTC funded wallet's private key>   # Optional. Do not use your main wallet's private key here, simply create a new wallet, use the official CreditCoin faucet at their discord, and get some test CTC. You can use a real CTC funded wallet too, but that is for mainnet. So be careful.
 ```
+
 Your .env should have these settings.
 
-### *Optional*
-*For submitting proof on Attestcoin, you must get a real wallet's private key, funded with CTC (or tCtc if on testnet) to do actions requiring it;*
-*Then set it at `CREDITCOIN_SIGNER_KEY=` as shown above.*
+### _Optional_
+
+_For submitting proof on Attestcoin, you must get a real wallet's private key, funded with CTC (or tCtc if on testnet) to do actions requiring it;_
+_Then set it at `CREDITCOIN_SIGNER_KEY=` as shown above._
 
 Lastly, simply built and run the app with:
+
 ```
 npm run build
 npm run start
 ```
-
 
 ## Full Architecture
 
@@ -377,12 +374,12 @@ Each tool is a `ToolDef`:
 
 Grouped by risk:
 
-| Risk | Tools | Executor |
-| --- | --- | --- |
-| read | `get_balances`, `get_transaction_status`, `check_attestation_status`, `wait_for_attestation`, `attestcoin_network_status`, `list_contacts`, `list_chains`, `list_recent_actions`, `list_automation_rules`, `list_recurring_payments`, `decode_source_transaction`, `verify_proof_readonly`, `estimate_verification_cost`, `get_attestation_bounds`, `get_app_status` | server |
-| funds | `transfer`, `batch_transfer`, `create_recurring_payment`, `cancel_recurring_payment` | client (wallet) |
-| deploy | `deploy_contract`, `create_conditional_release`, `execute_conditional_release`, `cross_chain_swap` | client; always confirmed |
-| config | `create_contact`, `create_automation_rule`, `update_automation_rule`, `delete_automation_rule`, `submit_proof_onchain` | server (`submit_proof_onchain` uses the opt-in server signer) |
+| Risk   | Tools                                                                                                                                                                                                                                                                                                                                                                | Executor                                                      |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| read   | `get_balances`, `get_transaction_status`, `check_attestation_status`, `wait_for_attestation`, `attestcoin_network_status`, `list_contacts`, `list_chains`, `list_recent_actions`, `list_automation_rules`, `list_recurring_payments`, `decode_source_transaction`, `verify_proof_readonly`, `estimate_verification_cost`, `get_attestation_bounds`, `get_app_status` | server                                                        |
+| funds  | `transfer`, `batch_transfer`, `create_recurring_payment`, `cancel_recurring_payment`                                                                                                                                                                                                                                                                                 | client (wallet)                                               |
+| deploy | `deploy_contract`, `create_conditional_release`, `execute_conditional_release`, `cross_chain_swap`                                                                                                                                                                                                                                                                   | client; always confirmed                                      |
+| config | `create_contact`, `create_automation_rule`, `update_automation_rule`, `delete_automation_rule`, `submit_proof_onchain`                                                                                                                                                                                                                                               | server (`submit_proof_onchain` uses the opt-in server signer) |
 
 Design principle: few, rich tools. One `transfer` tool with chain and token
 parameters beats five near-duplicates. Every fund-moving tool is
@@ -398,14 +395,14 @@ run in the Node process, write through drizzle, and return JSON.
 validates the intent (zod); the browser converts it into a specific, known
 transaction shape:
 
-| Tool | Transaction shape |
-| --- | --- |
-| `transfer` (native) | `sendTransaction` |
-| `transfer` (ERC-20) | `writeContract transfer(...)` |
-| `batch_transfer` | sequential transfers |
-| `deploy_contract` | `deployContract(server-compiled bytecode)` |
-| `create_conditional_release` | deploy + escrow value in one tx |
-| release/swap tools | `writeContract release(...)` |
+| Tool                         | Transaction shape                          |
+| ---------------------------- | ------------------------------------------ |
+| `transfer` (native)          | `sendTransaction`                          |
+| `transfer` (ERC-20)          | `writeContract transfer(...)`              |
+| `batch_transfer`             | sequential transfers                       |
+| `deploy_contract`            | `deployContract(server-compiled bytecode)` |
+| `create_conditional_release` | deploy + escrow value in one tx            |
+| release/swap tools           | `writeContract release(...)`               |
 
 The model never supplies transaction bytes. For auto chain-switching, every
 executor awaits `switchChain` to the tool's target chain (silent where the
@@ -503,13 +500,13 @@ Solidity sources, compiled in-process by the app's own solc service
 (`lib/contracts/compile.ts`) with no external toolchain. Compile tests
 assert real bytecode:
 
-| Contract | Role |
-| --- | --- |
-| `ConditionalRelease.sol` | escrow: funds released only when an Attestcoin proof verifies on-chain |
-| `CrossChainSwapSource.sol` | locks ETH on Sepolia (source side of a swap) |
-| `CrossChainSwapDestination.sol` | releases tCTC on Creditcoin, proof-gated, with refund path |
-| `templates/` | vetted deployables (ERC-20, escrow, multisig) the agent can deploy after the confirmation card |
-| `vendor/` | Attestcoin verification interfaces |
+| Contract                        | Role                                                                                           |
+| ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `ConditionalRelease.sol`        | escrow: funds released only when an Attestcoin proof verifies on-chain                         |
+| `CrossChainSwapSource.sol`      | locks ETH on Sepolia (source side of a swap)                                                   |
+| `CrossChainSwapDestination.sol` | releases tCTC on Creditcoin, proof-gated, with refund path                                     |
+| `templates/`                    | vetted deployables (ERC-20, escrow, multisig) the agent can deploy after the confirmation card |
+| `vendor/`                       | Attestcoin verification interfaces                                                             |
 
 Amount integrity rule, enforced in both executors and contracts: the lock
 side and release side of a swap are separate values, converted only through
@@ -527,34 +524,34 @@ overridable with `ACP_DB_PATH`.
 
 Eight tables:
 
-| Table | Contents |
-| --- | --- |
-| `payments` | every payment: recipient, token, amount (human + base units), status, tx hash, chain, and attestation fields (`attested_at`, `attest_root`, `onchain_verified_at`, `cc3_tx_hash`) |
-| `contacts` | the address book (label ↔ address, favorite, lastUsed) that the agent resolves names against |
-| `notifications` | inbox; rows reference `related_payment_id` for deep links |
-| `recurring_schedules` | cadence, next/last fire, executions/max, active, last dispatch outcome |
-| `agent_settings` | single `local` row: mainnet deploy opt-in, warning dismissal, active chain keys |
-| `agent_actions` | the user-visible action log: every tool attempt, status machine (`pending → awaiting_confirmation → running → succeeded/failed/declined/interrupted`), risk class, USD value, proof refs |
-| `skills` | skill library (instructions, tool allowlist JSON, enabled) |
-| `automation_rules` | trigger/condition/action rules the automation poller evaluates |
+| Table                 | Contents                                                                                                                                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `payments`            | every payment: recipient, token, amount (human + base units), status, tx hash, chain, and attestation fields (`attested_at`, `attest_root`, `onchain_verified_at`, `cc3_tx_hash`)        |
+| `contacts`            | the address book (label ↔ address, favorite, lastUsed) that the agent resolves names against                                                                                             |
+| `notifications`       | inbox; rows reference `related_payment_id` for deep links                                                                                                                                |
+| `recurring_schedules` | cadence, next/last fire, executions/max, active, last dispatch outcome                                                                                                                   |
+| `agent_settings`      | single `local` row: mainnet deploy opt-in, warning dismissal, active chain keys                                                                                                          |
+| `agent_actions`       | the user-visible action log: every tool attempt, status machine (`pending → awaiting_confirmation → running → succeeded/failed/declined/interrupted`), risk class, USD value, proof refs |
+| `skills`              | skill library (instructions, tool allowlist JSON, enabled)                                                                                                                               |
+| `automation_rules`    | trigger/condition/action rules the automation poller evaluates                                                                                                                           |
 
 Amounts are stored both as human-readable strings and as base-unit strings;
 transactions use the base-unit string, so there is no float drift.
 
 ### 6. API surface (`src/app/api/**`, 27 routes)
 
-| Prefix | Routes | Notes |
-| --- | --- | --- |
-| `agent/` | `run`, `respond`, `actions`, `policy`, `test-connection` | the NDJSON pair, the action log, and policy |
-| `attestcoin/` | `status`, `recent`, `proof`, `verify-certificate` | network status, recent attestations, proof fetch, live certificate verification |
-| `payments/` | route, `[id]`, `attest-batch` | history, per-payment ops, batch attest |
-| `contacts/` | route, `[id]`, `used` | CRUD plus lastUsed bump |
-| `recurring/` | route, `[id]` | schedule CRUD (hard deletes: rows are removed, not soft-hidden) |
-| `automation/` | route, `[id]` | rule CRUD |
-| `skills/` | route, `[id]` | skill CRUD (registry-validated allowlists) |
-| `wallet/` | `activity` | on-chain activity log join |
-| `models/` | route | model listing for the provider form |
-| `notifications/` | route, `[id]`, `mark-all-read`, `unread-count` | inbox plus the badge feed (count only) |
+| Prefix           | Routes                                                   | Notes                                                                           |
+| ---------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `agent/`         | `run`, `respond`, `actions`, `policy`, `test-connection` | the NDJSON pair, the action log, and policy                                     |
+| `attestcoin/`    | `status`, `recent`, `proof`, `verify-certificate`        | network status, recent attestations, proof fetch, live certificate verification |
+| `payments/`      | route, `[id]`, `attest-batch`                            | history, per-payment ops, batch attest                                          |
+| `contacts/`      | route, `[id]`, `used`                                    | CRUD plus lastUsed bump                                                         |
+| `recurring/`     | route, `[id]`                                            | schedule CRUD (hard deletes: rows are removed, not soft-hidden)                 |
+| `automation/`    | route, `[id]`                                            | rule CRUD                                                                       |
+| `skills/`        | route, `[id]`                                            | skill CRUD (registry-validated allowlists)                                      |
+| `wallet/`        | `activity`                                               | on-chain activity log join                                                      |
+| `models/`        | route                                                    | model listing for the provider form                                             |
+| `notifications/` | route, `[id]`, `mark-all-read`, `unread-count`           | inbox plus the badge feed (count only)                                          |
 
 All routes use the Node runtime (`node:sqlite` and the agent toolchain are
 Node-only). The agent's model calls proxy the browser-supplied key per run;
@@ -662,10 +659,7 @@ four files at test time. ~1,090 keys, fully translated.
    control, overflow checks) before deployment. The confirmation card is
    the final human checkpoint before signing.
 
-
 </details>
-
-
 
 ### Protocol correctness details (the things that bite if you skip them)
 
@@ -696,7 +690,7 @@ four files at test time. ~1,090 keys, fully translated.
   and our pipeline extends automatically as coverage grows.
 - **Writability** (Attestcoin's outbox → attestor quorum → relayer → destination inbox
   messaging) is not yet live on testnet (3rd-party audits in progress). The moment it
-  ships, conditional releases can resolve on the *destination* chain instead of only on
+  ships, conditional releases can resolve on the _destination_ chain instead of only on
   Creditcoin — the agent layer already speaks in proof-shaped intents, so this is a
   contract-layer upgrade, not a redesign.
 - LLM-authored contracts carry residual risk vs. vetted templates; skills constrain

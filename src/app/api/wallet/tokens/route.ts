@@ -62,34 +62,45 @@ async function knownTokenBalances(
 ): Promise<WalletTokenDto[]> {
   const chain = getChainByChainId(chainId);
   if (!chain || chain.tokens.length === 0) return [];
-  const client = createPublicClient({ transport: http(chain.rpcUrls[0]) });
+  // R17 fix: bounded transport (a dead RPC no longer stalls up to ~40s — the
+  // old serial per-token reads each carried viem's default 10s×3 retries).
+  const client = createPublicClient({
+    transport: http(chain.rpcUrls[0], { timeout: 8_000, retryCount: 1 }),
+  });
   const lower = address.toLowerCase();
+  const tokens = chain.tokens.filter((tok) => tok.address.toLowerCase() !== lower);
+  // R17: reads run in PARALLEL — serial reads multiplied per-token latency.
+  const results = await Promise.all(
+    tokens.map(async (tok) => {
+      try {
+        const balance = (await client.readContract({
+          address: tok.address,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [address as Address],
+        })) as bigint;
+        return { tok, balance };
+      } catch {
+        // RPC read failed for this token — skip it (chain may not index it)
+        return null;
+      }
+    }),
+  );
   const out: WalletTokenDto[] = [];
-  for (const tok of chain.tokens) {
-    if (tok.address.toLowerCase() === lower) continue;
-    try {
-      const balance = (await client.readContract({
-        address: tok.address,
-        abi: erc20Abi,
-        functionName: "balanceOf",
-        args: [address as Address],
-      })) as bigint;
-      if (balance === 0n) continue;
-      out.push({
-        address: tok.address,
-        symbol: tok.symbol,
-        name: tok.name,
-        decimals: tok.decimals,
-        rawBalance: balance.toString(),
-        balanceHuman: formatBalance(balance.toString(), tok.decimals),
-        logoUri: null,
-        priceUsd: null,
-        usdValue: null,
-        inRegistry: true,
-      });
-    } catch {
-      // RPC read failed for this token — skip it (chain may not index it)
-    }
+  for (const r of results) {
+    if (!r || r.balance === 0n) continue;
+    out.push({
+      address: r.tok.address,
+      symbol: r.tok.symbol,
+      name: r.tok.name,
+      decimals: r.tok.decimals,
+      rawBalance: r.balance.toString(),
+      balanceHuman: formatBalance(r.balance.toString(), r.tok.decimals),
+      logoUri: null,
+      priceUsd: null,
+      usdValue: null,
+      inRegistry: true,
+    });
   }
   return out;
 }

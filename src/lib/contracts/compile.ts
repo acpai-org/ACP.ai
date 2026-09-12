@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
+import { Worker } from "node:worker_threads";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Solidity compilation service (server-side only).
@@ -11,29 +13,35 @@ import path from "node:path";
 // worklog). @openzeppelin imports resolve from node_modules.
 //
 // Artifacts are cached by the source-set hash (compiles are deterministic).
+//
+// R22 (round 4): the solc invocation now runs inside a dedicated worker
+// thread. solc-js compile() is synchronous and CPU-heavy — viaIR compiles
+// take seconds and can take a minute+ — and in-process it froze the entire
+// Node event loop for the duration, stalling every concurrent request, SSE
+// stream and poller tick. The worker additionally isolates failures (a solc
+// OOM/crash used to take the whole server down; now exactly one request
+// fails with a clear error) and keeps the multi-MB soljson module out of the
+// main server heap. The worker is spawned from an eval-mode source string
+// ON PURPOSE: bundlers (turbopack/webpack) never see it, and solc is loaded
+// at runtime from the real node_modules path via createRequire — zero
+// bundler interference. Compiles are serialized (mirroring the old sync
+// behavior and bounding worst-case worker memory to one live worker) and
+// deduplicated per source-set hash while in flight.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const G = globalThis as unknown as {
-  __acpSolc?: unknown;
   __acpArtifactCache?: Map<string, CompileArtifact>;
+  __acpSolcInflight?: Map<string, Promise<CompileArtifact>>;
 };
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-async function loadSolc(): Promise<any> {
-  if (G.__acpSolc) return G.__acpSolc as any;
-  // Dynamic import: works in the Next.js server bundle AND under plain
-  // node/tsx (tests). solc is CJS — take .default when present.
-  const mod = await import("solc");
-  const resolved = (mod as any).default && typeof (mod as any).default.compile === "function"
-    ? (mod as any).default
-    : (mod as any);
-  G.__acpSolc = resolved;
-  return resolved;
-}
 
 function artifactCache(): Map<string, CompileArtifact> {
   if (!G.__acpArtifactCache) G.__acpArtifactCache = new Map();
   return G.__acpArtifactCache;
+}
+
+function inFlight(): Map<string, Promise<CompileArtifact>> {
+  if (!G.__acpSolcInflight) G.__acpSolcInflight = new Map();
+  return G.__acpSolcInflight;
 }
 
 const CONTRACTS_ROOT = path.join(process.cwd(), "contracts");
@@ -92,16 +100,148 @@ function readContractFile(relPath: string): string | null {
   }
 }
 
-/** Read an import from node_modules (@openzeppelin/contracts, etc.). */
-function readNodeModulesImport(spec: string): string | null {
-  const abs = path.join(process.cwd(), "node_modules", spec);
-  if (!abs.includes(path.join(process.cwd(), "node_modules"))) return null;
-  if (!existsSync(abs)) return null;
+// ── Worker plumbing ──────────────────────────────────────────────────────────
+//
+// The worker replicates the import-resolution logic (contracts/ relative
+// imports + node_modules @-imports) with fs access of its own, cwd being
+// passed in workerData. It must stay behaviorally in sync with
+// readContractFile() above — both guard the same way against traversal.
+
+/**
+ * Eval-mode worker source. Runs as the worker's main script in any context
+ * (all node built-ins are pulled via dynamic import, which works from both
+ * CJS and ESM entry styles). Posts exactly one message back:
+ *   { ok: true, raw: <solc JSON output string> } on success
+ *   { ok: false, error: <stack string> } on failure
+ */
+const SOLC_WORKER_SOURCE = `
+(async () => {
+  const { parentPort, workerData } = await import("node:worker_threads");
   try {
-    return readFileSync(abs, "utf8");
-  } catch {
-    return null;
+    const { pathToFileURL } = await import("node:url");
+    const path = await import("node:path");
+    const fs = await import("node:fs");
+    const CONTRACTS_ROOT = path.join(workerData.cwd, "contracts");
+    const NODE_MODULES_ROOT = path.join(workerData.cwd, "node_modules");
+    function readContractFile(relPath) {
+      const normalized = String(relPath).split("\\\\").join("/");
+      if (normalized.includes("..")) return null;
+      const base = normalized.startsWith("contracts/") ? normalized : "contracts/" + normalized;
+      const abs = path.join(workerData.cwd, base);
+      if (!abs.startsWith(CONTRACTS_ROOT)) return null;
+      if (!fs.existsSync(abs)) return null;
+      try { return fs.readFileSync(abs, "utf8"); } catch { return null; }
+    }
+    function readNodeModulesImport(spec) {
+      const abs = path.join(workerData.cwd, "node_modules", spec);
+      if (!abs.includes(NODE_MODULES_ROOT)) return null;
+      if (!fs.existsSync(abs)) return null;
+      try { return fs.readFileSync(abs, "utf8"); } catch { return null; }
+    }
+    const importCallback = (importPath) => {
+      if (importPath.startsWith("./") || importPath.startsWith("../")) {
+        const content = readContractFile(importPath);
+        if (content != null) return { contents: content };
+        return { error: "File not found: " + importPath };
+      }
+      if (importPath.startsWith("contracts/")) {
+        const content = readContractFile(importPath.slice("contracts/".length));
+        if (content != null) return { contents: content };
+        return { error: "File not found: " + importPath };
+      }
+      if (importPath.startsWith("@")) {
+        const content = readNodeModulesImport(importPath);
+        if (content != null) return { contents: content };
+        return { error: "Module not found: " + importPath };
+      }
+      return { error: "Unsupported import: " + importPath };
+    };
+    const mod = await import(pathToFileURL(workerData.solcEntry).href);
+    const solc = mod.default && typeof mod.default.compile === "function" ? mod.default : mod;
+    const raw = solc.compile(workerData.inputJson, { import: importCallback });
+    parentPort.postMessage({ ok: true, raw });
+  } catch (err) {
+    parentPort.postMessage({ ok: false, error: String((err && err.stack) || err) });
   }
+})();
+`;
+
+/** Hard ceiling for one compilation. Previously a stuck compile froze the
+ *  server forever; now the worker is terminated and the request fails loud. */
+const SOLC_WORKER_TIMEOUT_MS = 240_000;
+
+/** Worker V8 heap cap — a runaway compile dies inside the worker (one failed
+ *  request) instead of OOM-killing the whole server process. Generous vs the
+ *  few-hundred-MB legit viaIR compiles actually need. */
+const SOLC_WORKER_RESOURCE_LIMITS = { maxOldGenerationSizeMb: 768 };
+
+let solcEntryCache: string | null = null;
+function solcEntry(): string {
+  if (solcEntryCache) return solcEntryCache;
+  // Resolve from the REAL node_modules on disk (bundler-independent — works
+  // identically under the Next.js server bundle and plain node/tsx tests).
+  const req = createRequire(path.join(process.cwd(), "package.json"));
+  solcEntryCache = req.resolve("solc");
+  return solcEntryCache;
+}
+
+function runSolcWorker(inputJson: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    let worker: Worker;
+    try {
+      worker = new Worker(SOLC_WORKER_SOURCE, {
+        eval: true,
+        workerData: { cwd: process.cwd(), inputJson, solcEntry: solcEntry() },
+        resourceLimits: SOLC_WORKER_RESOURCE_LIMITS,
+      });
+    } catch (err) {
+      reject(new Error(`Solidity worker spawn failed: ${err instanceof Error ? err.message : String(err)}`));
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      void worker.terminate();
+      reject(new Error(`Solidity compilation exceeded ${SOLC_WORKER_TIMEOUT_MS / 1000}s — worker terminated`));
+    }, SOLC_WORKER_TIMEOUT_MS);
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // One-shot worker: always tear it down once we have our answer.
+      void worker.terminate();
+      fn();
+    };
+    worker.on("message", (msg: unknown) => {
+      const m = msg as { ok?: boolean; raw?: unknown; error?: unknown };
+      finish(() => {
+        if (m && m.ok === true && typeof m.raw === "string") {
+          resolve(m.raw);
+        } else {
+          reject(new Error(`Solidity worker failed: ${typeof m?.error === "string" ? m.error : "no output"}`));
+        }
+      });
+    });
+    worker.on("error", (err) => {
+      finish(() => reject(new Error(`Solidity worker crashed: ${err instanceof Error ? err.message : String(err)}`)));
+    });
+    worker.on("exit", (code) => {
+      finish(() => reject(new Error(`Solidity worker exited before reporting (code ${code})`)));
+    });
+  });
+}
+
+// Compile serialization: a promise chain mirroring the old fully-synchronous
+// behavior (one compile at a time) — bounds worst-case worker memory to a
+// single live solc instance.
+let compileChain: Promise<unknown> = Promise.resolve();
+function enqueueCompile<T>(fn: () => Promise<T>): Promise<T> {
+  const run = compileChain.then(fn, fn);
+  compileChain = run.catch(() => {
+    /* errors propagate to the caller; the chain stays runnable */
+  });
+  return run;
 }
 
 /** The known source set for a contract (its file + everything it imports). */
@@ -172,7 +312,23 @@ async function runSolc(sources: Record<string, { content: string }>, contractNam
   const cacheKey = `${hash}:${contractName}`;
   const cached = artifactCache().get(cacheKey);
   if (cached) return cached;
+  const inflight = inFlight().get(cacheKey);
+  if (inflight) return inflight;
 
+  const job = enqueueCompile(() => compileInWorker(sources, hash, contractName));
+  inFlight().set(cacheKey, job);
+  try {
+    return await job;
+  } finally {
+    inFlight().delete(cacheKey);
+  }
+}
+
+async function compileInWorker(
+  sources: Record<string, { content: string }>,
+  hash: string,
+  contractName: string,
+): Promise<CompileArtifact> {
   const input = {
     language: "Solidity" as const,
     sources,
@@ -192,30 +348,7 @@ async function runSolc(sources: Record<string, { content: string }>, contractNam
     },
   };
 
-  const importCallback = (importPath: string): { contents?: string; error?: string } => {
-    // Relative imports inside contracts/ (e.g. ./vendor/X.sol)
-    if (importPath.startsWith("./") || importPath.startsWith("../")) {
-      // solc passes already-resolved absolute-ish keys; resolve relative to the
-      // file's key by taking the path as given when it starts with contracts/.
-      const content = readContractFile(importPath);
-      if (content != null) return { contents: content };
-      return { error: `File not found: ${importPath}` };
-    }
-    if (importPath.startsWith("contracts/")) {
-      const content = readContractFile(importPath.slice("contracts/".length));
-      if (content != null) return { contents: content };
-      return { error: `File not found: ${importPath}` };
-    }
-    if (importPath.startsWith("@")) {
-      const content = readNodeModulesImport(importPath);
-      if (content != null) return { contents: content };
-      return { error: `Module not found: ${importPath}` };
-    }
-    return { error: `Unsupported import: ${importPath}` };
-  };
-
-  const solcModule = await loadSolc();
-  const raw = solcModule.compile(JSON.stringify(input), { import: importCallback });
+  const raw = await runSolcWorker(JSON.stringify(input));
   const output = JSON.parse(raw) as SolcOutput;
 
   const errors = (output.errors ?? []).filter((e) => e.severity === "error");
@@ -299,6 +432,6 @@ async function runSolc(sources: Record<string, { content: string }>, contractNam
     creationGas,
     methodGas,
   };
-  artifactCache().set(cacheKey, artifact);
+  artifactCache().set(`${hash}:${contractName}`, artifact);
   return artifact;
 }

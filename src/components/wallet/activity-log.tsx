@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "motion/react";
 import Link from "next/link";
@@ -15,6 +15,8 @@ import {
   Loader2,
   Repeat,
   Receipt,
+  FileSpreadsheet,
+  Check,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { useI18n } from "@/lib/i18n";
@@ -84,6 +86,8 @@ export function ActivityLog({ address, chainId }: { address: string; chainId: nu
   const askAgent = useAskAgent();
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // R33: transient success state on the CSV export button.
+  const [exportedCsv, setExportedCsv] = useState(false);
 
   const onchainQuery = useQuery<{ source: string; entries: OnchainEntry[] }>({
     queryKey: ["wallet-activity", chainId, address],
@@ -152,12 +156,105 @@ export function ActivityLog({ address, chainId }: { address: string; chainId: nu
     { value: "agent", key: "wallet.filterAgent", count: counts.agent },
   ];
 
+  /** R33: CSV export of the wallet activity log — the same RFC 4180 + BOM
+   * recipe as the actions/payments CSVs (spreadsheet-friendly for audit
+   * review). Exports the FULL merged window the "All" chip counts (not the
+   * filter-narrowed view) so the file's row count always agrees with the
+   * chips — the same honesty rule as the payments export. */
+  const handleExportCsv = useCallback(() => {
+    if (merged.length === 0) return;
+    const cell = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    const header = [
+      "time_iso",
+      "id",
+      "source",
+      "kind",
+      "direction",
+      "status",
+      "method",
+      "token_symbol",
+      "amount",
+      "from",
+      "to",
+      "fee",
+      "tx_hash",
+      "summary",
+    ].join(",");
+    const lines = merged.map((e) => {
+      if (e.source === "onchain") {
+        const oc = e.onchain!;
+        return [
+          oc.timestamp != null ? new Date(oc.timestamp).toISOString() : "",
+          oc.id,
+          "onchain",
+          oc.kind,
+          oc.direction,
+          oc.status === "ok" ? "succeeded" : oc.status,
+          oc.method ?? "",
+          oc.tokenSymbol ?? "",
+          oc.amountHuman ?? "",
+          oc.from,
+          oc.to ?? "",
+          oc.feeHuman ?? "",
+          oc.hash,
+          "",
+        ]
+          .map(cell)
+          .join(",");
+      }
+      const ag = e.agent!;
+      return [
+        new Date(ag.createdAt).toISOString(),
+        ag.id,
+        "agent",
+        ag.tool,
+        "",
+        ag.status,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ag.result?.txHash ?? "",
+        ag.result?.summary ?? "",
+      ]
+        .map(cell)
+        .join(",");
+    });
+    // BOM so Excel infers UTF-8 when summaries carry CJK text.
+    const blob = new Blob(["\uFEFF" + header + "\n" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `acp-wallet-activity-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setExportedCsv(true);
+    setTimeout(() => setExportedCsv(false), 1500);
+  }, [merged]);
+
   return (
     <Card>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <ActivityIcon className="h-4 w-4 text-muted" aria-hidden />
         <h2 className="text-sm font-semibold text-foreground">{t("wallet.activity")}</h2>
         <span className="text-[10px] text-muted-2">{t("wallet.activitySubtitle")}</span>
+        {/* R33: CSV export of the activity log (RFC 4180 + BOM, same recipe
+            as the actions/payments CSVs). Disabled with an honest tooltip
+            when there is nothing to export. */}
+        <button
+          type="button"
+          onClick={handleExportCsv}
+          disabled={merged.length === 0 || exportedCsv}
+          title={merged.length === 0 ? t("wallet.exportCsvEmpty") : t("wallet.exportCsv")}
+          className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border/70 bg-surface-2/40 px-2.5 py-1.5 text-[11px] font-medium text-muted-2 transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-primary disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+        >
+          {exportedCsv ? <Check className="h-3.5 w-3.5 text-success" aria-hidden /> : <FileSpreadsheet className="h-3.5 w-3.5" aria-hidden />}
+          {t("wallet.exportCsv")}
+        </button>
       </div>
 
       <div className="mb-3 flex flex-wrap gap-1.5">

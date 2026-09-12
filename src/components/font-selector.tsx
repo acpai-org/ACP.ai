@@ -42,7 +42,11 @@ export function FontSelector() {
       <div
         role="radiogroup"
         aria-label={t("settings.fontFamily")}
-        className="flex items-center gap-0.5 rounded-xl bg-surface-2/60 p-0.5"
+        // S11-b (round-6 styling, VLM-guided): the Toggle's verified-visible
+        // track recipe (bg-foreground/10 + inset ring-foreground/25) — the
+        // theme-selector's border-border/bg-surface-2 treatment is #1c1c1c on
+        // #121212, invisible at this small scale in dark mode.
+        className="flex items-center gap-1 rounded-xl bg-foreground/10 p-1 ring-1 ring-inset ring-foreground/25"
       >
         {FAMILIES.map((f) => (
           <button
@@ -54,7 +58,7 @@ export function FontSelector() {
             className={cn(
               "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60",
               prefs.family === f.value
-                ? "bg-primary/15 text-primary"
+                ? "bg-primary/15 text-primary ring-1 ring-inset ring-primary/30"
                 : "text-muted hover:text-foreground",
             )}
           >
@@ -66,7 +70,7 @@ export function FontSelector() {
       <div
         role="radiogroup"
         aria-label={t("settings.fontSize")}
-        className="flex items-center gap-0.5 rounded-xl bg-surface-2/60 p-0.5"
+        className="flex items-center gap-1 rounded-xl bg-foreground/10 p-1 ring-1 ring-inset ring-foreground/25"
       >
         {SIZES.map((s) => (
           <button
@@ -78,7 +82,7 @@ export function FontSelector() {
             className={cn(
               "min-w-8 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60",
               prefs.scale === s.value
-                ? "bg-primary/15 text-primary"
+                ? "bg-primary/15 text-primary ring-1 ring-inset ring-primary/30"
                 : "text-muted hover:text-foreground",
             )}
           >

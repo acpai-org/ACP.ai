@@ -76,7 +76,10 @@ export function StatCard({
         {icon ? (
           <div
             className={cn(
-              "text-muted-2 transition-colors duration-300",
+              // S11-c (round-6 styling, VLM-guided): default icon contrast
+              // bumped one step (muted-2 → muted) — the stat-card icons read
+              // as "very faint" in dark mode otherwise.
+              "text-muted transition-colors duration-300",
               iconClassName ? "group-hover:brightness-110" : "group-hover:text-primary",
               iconClassName,
             )}
@@ -114,7 +117,11 @@ export function EmptyState({
       {icon ? (
         <div
           className={cn(
-            "flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-2 text-muted-2",
+            // R25: the default tile was bg-surface-2/text-muted-2 — nearly
+            // invisible against the glass panel (live VLM review). Now a
+            // primary-tinted tile with an inset ring + top highlight so the
+            // empty state anchors the card visually instead of dissolving.
+            "flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/[0.07] text-primary/80 ring-1 ring-inset ring-primary/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]",
             iconTileClassName,
           )}
         >

@@ -119,14 +119,18 @@ export function ChatView() {
 
   const startPolling = useCallback((paymentId: string, messageId: string) => {
     if (pollingRef.current.has(messageId)) return;
-    pollingRef.current.forEach((interval) => clearInterval(interval));
-    pollingRef.current.clear();
-    pollingTimeouts.current.forEach((t) => clearTimeout(t));
-    pollingTimeouts.current.clear();
-
+    // R13 fix: one poller PER PAYMENT — never clear siblings. The old code
+    // cleared ALL pollers and their 120s fallback timeouts before registering
+    // the new one, so a second payment in "signing" froze the first message's
+    // poller AND its safety timeout: that payment stayed "signing" in the UI
+    // forever while the DB settled silently. Dedup is by messageId only.
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/payments/${paymentId}`, { cache: "no-store" });
+        const res = await fetch(`/api/payments/${paymentId}`, {
+          cache: "no-store",
+          // R13: bounded request — a hung fetch would pile up on every 3s tick.
+          signal: AbortSignal.timeout(10_000),
+        });
         if (!res.ok) return;
         const { payment } = (await res.json()) as {
           payment: {
@@ -531,6 +535,21 @@ export function ChatView() {
         }
         // Serialize the COMPLETED steps as real tool results the model must
         // not repeat; the failed steps as explicit retry directives.
+        // P10 fix: the server MUTATES step.args in place during preparation
+        // (loop.ts adds __compiled — full contract ABI + bytecode — and
+        // enriched values like __lockWei/__fundWei). Stripping those keys
+        // here keeps megabytes of bytecode out of the LLM request (token
+        // blowup / provider 400s) and out of localStorage; the server
+        // re-derives them on re-execution anyway.
+        const stripServerOnly = (args: Record<string, unknown> | null | undefined): Record<string, unknown> => {
+          if (!args || typeof args !== "object") return {};
+          const out: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(args)) {
+            if (k === "__compiled" || k === "__lockWei" || k === "__fundWei" || k === "__") continue;
+            out[k] = v;
+          }
+          return out;
+        };
         const history: AgentRunCallOptions["history"] = [
           ...msgs
             .slice(0, originIdx)
@@ -544,7 +563,7 @@ export function ChatView() {
             toolCalls: allSteps.map((st) => ({
               id: st.callId,
               name: st.tool,
-              args: (st.args ?? {}) as Record<string, unknown>,
+              args: stripServerOnly((st.args ?? {}) as Record<string, unknown>),
             })),
           },
         ];

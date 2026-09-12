@@ -140,7 +140,12 @@ export function InstallBanner() {
           transition={{ duration: 0.25, ease: "easeOut" }}
           className="fixed inset-x-4 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-30 sm:inset-x-auto sm:bottom-6 sm:left-1/2 sm:w-[24rem] sm:-translate-x-1/2"
         >
-          <div className="glass-panel flex items-center gap-3 rounded-2xl p-3.5 shadow-xl">
+          {/* S12-g (round-7 styling, VLM-guided): the floating banner read as
+              flat against the page in dark mode — the neumorphic panel
+              shadows alone don't define an edge. A resting inset ring + a
+              deeper drop shadow lift it off the page (same recipe as the
+              chat composer, S10-a). */}
+          <div className="glass-panel flex items-center gap-3 rounded-2xl p-3.5 shadow-[0_18px_44px_-16px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-foreground/[0.08]">
             {/* U1: tight-cropped mark (was a square chip wrapping the padded
                 1024² asset — the glyph inside read ~7px tall). The wordmark
                 now renders edge-to-edge at a legible height. */}

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, ensureDb } from "@/db";
 import { contacts } from "@/db/schema";
 import { isAddress } from "viem";
@@ -29,7 +29,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "A valid 0x address is required." }, { status: 400 });
   }
 
-  const existing = db.select().from(contacts).where(eq(contacts.address, address)).get();
+  // D14 fix: contacts may be stored checksummed while executors hand back
+  // lowercase (or vice versa) — compare case-insensitively so the lastUsed
+  // bump actually fires and "sort by recent use" keeps working.
+  const existing = db
+    .select()
+    .from(contacts)
+    .where(sql`lower(${contacts.address}) = ${address.toLowerCase()}`)
+    .get();
   if (!existing) {
     // Not a saved contact — not an error; callers fire-and-forget.
     return NextResponse.json({ updated: false });

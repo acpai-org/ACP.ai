@@ -47,7 +47,11 @@ function SettingRow({
         </div>
         <div>
           <p className="text-sm font-medium text-foreground">{label}</p>
-          <p className="text-xs text-muted-2">{description}</p>
+          {/* S12-f (round-7 styling, VLM-guided): descriptions at text-xs
+              muted-2 measure ~3.7:1 on the dark surface — below WCAG AA for
+              small text. One step up to muted (~6.6:1); muted-2 stays the
+              fine-print tier elsewhere. */}
+          <p className="text-xs text-muted">{description}</p>
         </div>
       </div>
       {children}

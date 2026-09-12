@@ -345,7 +345,11 @@ export function AttestcoinPanel() {
           <Button
             variant="ghost"
             size="sm"
-            className="hit-slop h-8 gap-1.5 px-2.5 text-xs"
+            // R25: the ghost variant's transparent border made the refresh
+            // control read as decoration, not a button (live VLM review) —
+            // give it a resting border that lifts on hover like every other
+            // interactive chip on this panel.
+            className="hit-slop h-8 gap-1.5 px-2.5 text-xs border-border/70 hover:border-primary/40 hover:bg-foreground/[0.04]"
             onClick={refresh}
             disabled={state.phase === "loading"}
             title={t("wallet.attestRefresh")}

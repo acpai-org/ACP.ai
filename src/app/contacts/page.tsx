@@ -793,35 +793,42 @@ export default function ContactsPage() {
         </Card>
       ) : null}
 
-      <Card>
-        <FinderSearch
-          value={query}
-          onChange={setQuery}
-          placeholder={t("contacts.searchPlaceholder")}
-          ariaLabel={t("contacts.searchPlaceholder")}
-        />
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowFavoritesOnly((v) => !v)}
-            aria-pressed={showFavoritesOnly}
-            className={cn(
-              "flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60",
-              showFavoritesOnly
-                ? "bg-warning/15 text-warning ring-1 ring-inset ring-warning/30"
-                : "glass-item text-muted hover:text-foreground",
-            )}
-          >
-            <Star className={cn("h-3.5 w-3.5", showFavoritesOnly && "fill-current")} />
-            {t("contacts.favorites")} {stats.favoritesCount > 0 ? `· ${stats.favoritesCount}` : ""}
-          </button>
-          <span className="text-[10px] text-muted-3">
-            {stats.recentlyUsedCount > 0
-              ? t("contacts.statsLine", { total: rows.length, recent: stats.recentlyUsedCount })
-              : t("contacts.statsLineIdle", { total: rows.length })}
-          </span>
-        </div>
-      </Card>
+      {/* S10-d (round-5 styling, VLM-guided): on a zero-contact page the search
+          box and the "Favorites · 0" filter are noise about nothing — an empty
+          list has nothing to search and nothing to favorite. The card renders
+          only once contacts exist; a fresh install goes straight to the
+          empty state (whose "Add contact" action stays). */}
+      {rows.length > 0 ? (
+        <Card>
+          <FinderSearch
+            value={query}
+            onChange={setQuery}
+            placeholder={t("contacts.searchPlaceholder")}
+            ariaLabel={t("contacts.searchPlaceholder")}
+          />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowFavoritesOnly((v) => !v)}
+              aria-pressed={showFavoritesOnly}
+              className={cn(
+                "flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60",
+                showFavoritesOnly
+                  ? "bg-warning/15 text-warning ring-1 ring-inset ring-warning/30"
+                  : "glass-item text-muted hover:text-foreground",
+              )}
+            >
+              <Star className={cn("h-3.5 w-3.5", showFavoritesOnly && "fill-current")} />
+              {t("contacts.favorites")} {stats.favoritesCount > 0 ? `· ${stats.favoritesCount}` : ""}
+            </button>
+            <span className="text-[10px] text-muted-3">
+              {stats.recentlyUsedCount > 0
+                ? t("contacts.statsLine", { total: rows.length, recent: stats.recentlyUsedCount })
+                : t("contacts.statsLineIdle", { total: rows.length })}
+            </span>
+          </div>
+        </Card>
+      ) : null}
 
       {isLoading ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" aria-busy>

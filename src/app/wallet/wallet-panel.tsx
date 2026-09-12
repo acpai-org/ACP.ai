@@ -64,7 +64,10 @@ const NetworkRow = memo(function NetworkRow({
         "flex items-center justify-between rounded-xl border px-4 py-3 transition-all",
         active
           ? "border-primary/40 bg-primary/10"
-          : "border-border bg-surface-2/40 hover:border-primary/30",
+          // S12-d (round-7 styling, VLM-guided): border-border (#1c1c1c) is
+          // invisible on the dark page — the inactive rows had no edge. A
+          // 10% foreground edge gives each row its card boundary.
+          : "border-foreground/10 bg-surface-2/40 hover:border-primary/30",
       )}
     >
       <button type="button" onClick={onSwitch} disabled={active} className="flex-1 text-left">
@@ -184,7 +187,7 @@ export function WalletPanel() {
         icon={<Wallet className="h-5 w-5" />}
       >
         <EmptyState
-          icon={<Wallet className="h-6 w-6" />}
+          icon={<Wallet className="h-7 w-7" />}
           title={t("wallet.notConnectedTitle")}
           description={t("wallet.notConnectedDesc")}
           action={
@@ -201,13 +204,29 @@ export function WalletPanel() {
             {BASE_NETWORKS.map((net) => (
               <div
                 key={net.id}
-                className="flex items-center justify-between rounded-xl border border-border bg-surface-2/40 px-4 py-3"
+                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-2/40 px-4 py-3 transition-colors hover:border-primary/25 hover:bg-surface-2/70"
               >
-                <div>
-                  <p className="text-sm font-medium text-foreground">{net.name}</p>
-                  <p className="text-xs text-muted-2">
-                    {net.nativeCurrency.symbol} · {t("wallet.chainIdWithId", { chainId: net.id })}
-                  </p>
+                <div className="flex min-w-0 items-center gap-2.5">
+                  {/* R25: testnet/mainnet accent dot — same color language as
+                   * the chain chips and action rows (amber=testnet,
+                   * emerald=mainnet), so the list reads as classified data
+                   * instead of raw config. */}
+                  <span
+                    className={cn(
+                      "h-2 w-2 shrink-0 rounded-full",
+                      net.testnet ? "bg-amber-500/80" : "bg-emerald-500/80",
+                    )}
+                    aria-hidden
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{net.name}</p>
+                    <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-2">
+                      <span className="font-medium">{net.nativeCurrency.symbol}</span>
+                      <span className="rounded-md bg-foreground/[0.06] px-1.5 py-px font-mono text-[10px] text-muted-2 ring-1 ring-inset ring-foreground/10">
+                        id {net.id}
+                      </span>
+                    </p>
+                  </div>
                 </div>
                 {/* D14: URLs must never overflow the row — truncate with the
                     full value on hover/long-press (title) instead of clipping

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { logAppAction } from "@/lib/agent/action-log";
-import { and, desc, eq, isNull, isNotNull, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, isNotNull, ne } from "drizzle-orm";
 import { db, ensureDb } from "@/db";
 import { payments } from "@/db/schema";
 import { getTxProof } from "@/lib/attestcoin/proof";
-import { ensureSourceChainMapFresh, sourceChainByEvmId } from "@/lib/attestcoin/chains";
+import { ensureSourceChainMapFresh, sourceChainByEvmId, SOURCE_CHAINS_FALLBACK_IDS } from "@/lib/attestcoin/chains";
 import { fetchBatchProofs } from "@/lib/attestcoin/batch";
+import { cc3ChainId } from "@/lib/attestcoin/cc3-links";
 import {
   submissionAvailability,
   submissionEnv,
@@ -65,6 +66,11 @@ export async function POST() {
   // G1 — live chain-key resolution before grouping.
   await ensureSourceChainMapFresh();
 
+  // P3 fix (candidate starvation — mirrors the poller's query): filter to
+  // tracked chains IN SQL and take the OLDEST candidates first so the window
+  // drains (newest-first left the least-likely-attested rows permanently
+  // occupying the candidate budget, and untracked-chain rows crowded out
+  // attestable payments entirely).
   const candidates = db
     .select()
     .from(payments)
@@ -75,9 +81,10 @@ export async function POST() {
         ne(payments.txHash, ""),
         ne(payments.txHash, "0x0"),
         isNull(payments.cc3TxHash),
+        inArray(payments.chainId, SOURCE_CHAINS_FALLBACK_IDS()),
       ),
     )
-    .orderBy(desc(payments.createdAt))
+    .orderBy(asc(payments.createdAt))
     .limit(CANDIDATE_LIMIT)
     .all();
 
@@ -194,13 +201,15 @@ export async function POST() {
   }
 
   // P24: batch on-chain submission logging (same as the single attest route).
+  // L2 fix: the logged chainId must follow the ACTIVE environment (the old
+  // hardcoded 102031 is testnet — a mainnet deployment recorded wrong refs).
   logAppAction({
     tool: "submit_proof_onchain",
     params: { batch: true, paymentIds: result.perPayment.map((e: { paymentId: string }) => e.paymentId) },
     status: "succeeded",
     summary: `Batch proof submission: ${result.perPayment.length} payment proof(s) submitted on-chain (verifyAndEmit, ${result.gasUsed ?? "?"} gas).`,
     riskClass: "deploy",
-    chainId: 102031,
+    chainId: cc3ChainId(submissionEnv()),
     cc3TxHash: result.perPayment[0].cc3TxHash ?? null,
   });
   return NextResponse.json({

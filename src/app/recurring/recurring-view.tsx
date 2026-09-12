@@ -1220,7 +1220,10 @@ export function RecurringView() {
               ) : (
                 <Link
                   href="/contacts"
-                  className="glass-item flex min-h-9 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-muted transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                  // S11-d (round-6 styling, VLM-guided): the only path
+                  // forward on the zero-contact empty state — primary-tinted
+                  // so it reads as an action, not leftover footer text.
+                  className="flex min-h-9 items-center gap-1.5 rounded-full border border-primary/25 bg-primary/[0.06] px-3 py-1.5 text-xs font-medium text-primary transition-all duration-200 hover:border-primary/50 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                 >
                   <UserPlus className="h-3 w-3" aria-hidden />
                   {t("payments.emptyAddContactChip")}

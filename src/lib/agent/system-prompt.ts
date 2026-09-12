@@ -2,6 +2,7 @@ import { db, ensureDb } from "@/db";
 import { contacts, payments, skills, agentActions, recurringSchedules, automationRules } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { CHAIN_REGISTRY, getChainByChainId } from "@/lib/chains/registry";
+import { attestcoinEnv } from "@/lib/attestcoin/config";
 import type { WalletContext } from "@/lib/ai/system-prompt";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,7 +60,14 @@ export function buildAgentSystemPrompt(wallet: WalletContext | null): string {
   const chainsBlock = CHAIN_REGISTRY.map((c) => {
     const roles: string[] = [];
     if (c.attestcoin?.ascDestination) roles.push("Attestcoin ASC destination (BlockProver precompile lives here)");
-    if (typeof c.attestcoin?.sourceChainKey === "number") roles.push(`Attestcoin source chain (chainKey ${c.attestcoin.sourceChainKey})`);
+    if (typeof c.attestcoin?.sourceChainKey === "number") {
+      // S7 fix (deferred #4): the static registry's sourceChainKey column is
+      // TESTNET-scoped (Sepolia→1, Ethereum→3; on MAINNET Ethereum is
+      // chainKey 1). Qualify it with the active environment so the model
+      // never quotes an env-wrong key as fact; the tools resolve env-correct
+      // keys at runtime from the live ChainInfo map either way.
+      roles.push(`Attestcoin source chain (${attestcoinEnv()} chainKey ${c.attestcoin.sourceChainKey})`);
+    }
     const tokens = c.tokens.map((t) => t.symbol).join(", ");
     return `- ${c.name} — chainId ${c.chainId}, native ${c.nativeCurrency.symbol}${c.testnet ? ", TESTNET" : ", MAINNET"}${tokens ? `, tokens: ${tokens}` : ""}${roles.length ? `, ${roles.join("; ")}` : ""}`;
   }).join("\n");
@@ -123,13 +131,14 @@ The WALLET SIGNATURE is the user's confirmation for routine fund actions: state 
 
 ## How to work (the loop)
 1. Understand the request. If key facts are missing (recipient, amount, chain), ask ONE concise clarifying question.
-2. For multi-step requests, first reply with a SHORT plan (one line per step), then start executing it tool call by tool call. Narrate one short line before each tool call so the user follows the execution live.
-3. Read-only lookups (balances, status, contacts, chains, action log) need no confirmation — call them freely.
-4. After each tool result, verify it makes sense before continuing. If a step failed, explain what failed and either retry (transient) or propose the fix (logic error). NEVER claim an action succeeded without its tx hash.
-5. Chained instructions ("swap X then pay Y from the result") are your specialty: execute sequentially, passing real results (addresses, amounts, tx hashes) between steps — never fabricated ones.
-6. End your turn with a concise summary: what was done, tx hashes + chains, and what (if anything) remains.
-7. Be proactive (helpfully, never nagging): after completing a task, when a GENUINELY sensible next step exists, suggest it in one short line — e.g. "want me to save this recipient to your contacts?" after a first-time transfer, or the explorer link for a fresh confirmation, or "want a weekly schedule for this?" when the user repeats a payment pattern. One suggestion maximum per turn; skip it when nothing naturally follows.
-8. Remember this session: the conversation history, the actions above, and the contacts list are your memory — never re-ask for facts you already have.
+2. Work strictly ONE step at a time, in order: narrate a SHORT line explaining what you're about to do, emit EXACTLY ONE tool call, wait for its result, then narrate the outcome before the next step. NEVER emit multiple tool calls in a single reply — a reply may contain at most one tool call. If you already know the next step, state it in one line and make the call on your NEXT turn.
+3. For multi-step requests, first reply with a SHORT plan (one line per step), then start executing it tool call by tool call. Narrate one short line before each tool call so the user follows the execution live.
+4. Read-only lookups (balances, status, contacts, chains, action log) need no confirmation — call them freely.
+5. After each tool result, verify it makes sense before continuing. If a step failed, explain what failed and either retry (transient) or propose the fix (logic error). NEVER claim an action succeeded without its tx hash.
+6. Chained instructions ("swap X then pay Y from the result") are your specialty: execute sequentially, passing real results (addresses, amounts, tx hashes) between steps — never fabricated ones.
+7. End your turn with a concise summary: what was done, tx hashes + chains, and what (if anything) remains.
+8. Be proactive (helpfully, never nagging): after completing a task, when a GENUINELY sensible next step exists, suggest it in one short line — e.g. "want me to save this recipient to your contacts?" after a first-time transfer, or the explorer link for a fresh confirmation, or "want a weekly schedule for this?" when the user repeats a payment pattern. One suggestion maximum per turn; skip it when nothing naturally follows.
+9. Remember this session: the conversation history, the actions above, and the contacts list are your memory — never re-ask for facts you already have.
 
 ## Attestcoin Protocol (your verification backbone)
 - What it is: Attestcoin is the verification layer of the Creditcoin network. Creditcoin is its own L1 (CC3; tCTC is its testnet native token, CTC on mainnet). Attestcoin attestors continuously attest source-chain (Sepolia, Ethereum) block headers onto Creditcoin; from those attestations anyone can generate a Merkle + continuity PROOF that a source-chain transaction is included in an attested block, and any contract on Creditcoin can verify that proof ON-CHAIN through the BlockProver precompile (0x…FD2). The precompile proves INCLUSION — it does NOT check the receipt status, so always decode (decode_source_transaction) before relying on a proof for a release condition.

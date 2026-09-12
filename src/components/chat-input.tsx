@@ -472,8 +472,13 @@ export function ChatInput({ onSend, disabled, prefill, onStop, isGenerating, ses
 
       <div
         className={cn(
-          "glass-tight rounded-2xl transition-all duration-200",
-          "focus-within:border-primary/40 focus-within:shadow-[0_0_0_3px_rgba(34,211,238,0.2)]",
+          // S10-a (round-5 styling, VLM-guided): the composer read as decoration
+          // — glass-tight alone was nearly indistinguishable from the page
+          // background. A resting inset ring + depth shadow gives it a visible
+          // field edge BEFORE focus; the focus-within glow then replaces the
+          // resting shadow (both states defined, no stacking).
+          "glass-tight rounded-2xl shadow-[0_10px_28px_-14px_rgba(0,0,0,0.45)] ring-1 ring-inset ring-foreground/[0.08] transition-all duration-200",
+          "focus-within:border-primary/40 focus-within:ring-primary/25 focus-within:shadow-[0_0_0_3px_rgba(34,211,238,0.2)]",
           attachments.length > 0 ? "p-2" : "p-2",
         )}
       >
@@ -522,7 +527,7 @@ export function ChatInput({ onSend, disabled, prefill, onStop, isGenerating, ses
             onClick={openPalette}
             title={t("palette.shortcutHint")}
             aria-label={t("palette.composerChip")}
-            className="hit-slop flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted-2 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 md:h-9 md:w-9"
+            className="hit-slop flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 md:h-9 md:w-9"
           >
             <Command className="h-4 w-4" aria-hidden />
           </button>
@@ -535,7 +540,7 @@ export function ChatInput({ onSend, disabled, prefill, onStop, isGenerating, ses
             onClick={openShortcutsHelp}
             title={t("shortcuts.hint")}
             aria-label={t("shortcuts.hint")}
-            className="hit-slop hidden h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted-2/70 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 sm:flex md:h-9 md:w-9"
+            className="hit-slop hidden h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted/80 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 sm:flex md:h-9 md:w-9"
           >
             <Keyboard className="h-4 w-4" aria-hidden />
           </button>

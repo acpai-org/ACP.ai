@@ -16,6 +16,20 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+// T1 fix (hermetic DB): the @/… imports below pull in @/lib/contracts/prepare
+// → @/lib/agent/policy → @/db, whose module scope opens ./sqlite.db in the
+// repo root and ensureDb() runs migrations + seeds on the DEVELOPER'S real dev
+// DB (and collides with a concurrently running `next dev`). Set ACP_DB_PATH to
+// a throwaway temp file BEFORE the first app-module import — same pattern as
+// agent-loop.test.mts.
+process.env.ACP_DB_PATH = path.join(
+  mkdtempSync(path.join(tmpdir(), "acp-fund-safety-test-")),
+  "test.db",
+);
 
 const { prepareClientTool } = await import("@/lib/agent/prepare-client");
 const { prepareDeployment } = await import("@/lib/contracts/prepare");

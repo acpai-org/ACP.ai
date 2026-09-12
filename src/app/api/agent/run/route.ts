@@ -92,7 +92,17 @@ export async function POST(req: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
+      // L8 fix: capture the runId from the loop's first event so the abort
+      // sweep is RUN-SCOPED. The old sweepInterrupted() flipped the 30 newest
+      // non-terminal actions FROM ANY SESSION — a second tab's in-flight
+      // transfer got marked interrupted while its wallet prompt was still up,
+      // and (because `listActions(30)` is a ROW limit, not a time window)
+      // rows beyond the 30 newest escaped the sweep and spun "running"
+      // forever. The run-scoped interruptRunningActions(runId) existed but was
+      // dead code.
+      let runId: string | null = null;
       const send = (evt: AgentStreamEvent) => {
+        if (evt.type === "run_started" && typeof evt.runId === "string") runId = evt.runId;
         if (closed) return;
         try {
           controller.enqueue(encoder.encode(JSON.stringify(evt) + "\n"));
@@ -124,8 +134,15 @@ export async function POST(req: Request) {
           send({ type: "error", error: err instanceof Error ? err.message : "agent run failed" });
         } catch {}
       } finally {
-        if (req.signal.aborted) {
-          sweepInterrupted();
+        if (req.signal.aborted && runId) {
+          // L8: run-scoped interrupt — only THIS run's non-terminal rows flip
+          // to interrupted; broadcast rows keep their honest status.
+          try {
+            const { interruptRunningActions } = await import("@/lib/agent/action-log");
+            interruptRunningActions(runId);
+          } catch {
+            // non-critical
+          }
         }
         closed = true;
         try {
@@ -147,24 +164,4 @@ export async function POST(req: Request) {
       connection: "keep-alive",
     },
   });
-}
-
-/** On abort: flip non-terminal actions of the last 30 min to interrupted. */
-function sweepInterrupted(): void {
-  void import("@/lib/agent/action-log")
-    .then(({ listActions, patchAction }) => {
-      const recent = listActions(30);
-      const cutoff = Date.now() - 30 * 60_000;
-      for (const a of recent) {
-        if (a.createdAt >= cutoff && ["pending", "awaiting_confirmation", "running"].includes(a.status)) {
-          patchAction(a.id, {
-            status: "interrupted",
-            result: { ok: false, summary: "Run interrupted (page closed or stopped)." },
-          });
-        }
-      }
-    })
-    .catch(() => {
-      // non-critical
-    });
 }

@@ -11,7 +11,12 @@ export const runtime = "nodejs";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 50), 1), 200);
+  // L5 fix: Number("abc") is NaN and NaN propagates through min/max into
+  // SQLite's LIMIT bind, which throws ("datatype mismatch") → a 500 that the
+  // Actions tab rendered as "no actions yet". Non-numeric limits fall back
+  // to the default.
+  const rawLimit = Number(url.searchParams.get("limit") ?? 50);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 200) : 50;
   const rows = listActions(limit);
   return new Response(
     JSON.stringify({

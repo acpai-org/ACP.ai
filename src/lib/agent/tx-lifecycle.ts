@@ -52,17 +52,28 @@ interface TxLifecycleStore {
 export const useTxLifecycle = create<TxLifecycleStore>((set) => ({
   entries: {},
   record: (callId, patch) =>
-    set((state) => ({
-      entries: {
-        ...state.entries,
-        [callId]: {
-          ...state.entries[callId],
-          callId,
-          ...patch,
-          updatedAt: Date.now(),
-        },
-      },
-    })),
+    set((state) => {
+      // R16 fix: the live overlay never pruned — terminal entries accumulated
+      // for the whole session and PERMANENTLY shadowed the DB's persisted
+      // status for old callIds (a later server-side patch could never surface
+      // in the Actions view). Terminal entries older than 10 minutes are
+      // dropped on every record; non-terminal entries always survive.
+      const TERMINAL = new Set(["confirmed", "rejected", "failed", "timeout", "unknown"]);
+      const PRUNE_MS = 10 * 60_000;
+      const now = Date.now();
+      const next: Record<string, TxLifecycleEntry> = {};
+      for (const [id, e] of Object.entries(state.entries)) {
+        if (TERMINAL.has(e.status) && now - e.updatedAt > PRUNE_MS && id !== callId) continue;
+        next[id] = e;
+      }
+      next[callId] = {
+        ...state.entries[callId],
+        callId,
+        ...patch,
+        updatedAt: Date.now(),
+      };
+      return { entries: next };
+    }),
   clear: () => set({ entries: {} }),
 }));
 

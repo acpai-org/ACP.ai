@@ -1,9 +1,9 @@
-import { and, count, desc, eq, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { db, ensureDb } from "@/db";
 import { payments } from "@/db/schema";
 import { createPaymentNotification } from "@/lib/notifications";
 import { getTxProof } from "./proof";
-import { ensureSourceChainMapFresh, sourceChainByEvmId } from "./chains";
+import { ensureSourceChainMapFresh, sourceChainByEvmId, SOURCE_CHAINS_FALLBACK_IDS } from "./chains";
 import { fetchBatchProofs, type BatchProofEntry } from "./batch";
 import { verifyProofOnChain, verifyProofsBatchOnChain } from "./verify";
 
@@ -95,6 +95,9 @@ export function getPollerStats(): PollerStats {
           ne(payments.txHash, ""),
           ne(payments.txHash, "0x0"),
           isNull(payments.attestedAt),
+          // P3: count only attestable rows — same filter the candidates query
+          // uses, so the panel's number matches what the poller can act on.
+          inArray(payments.chainId, SOURCE_CHAINS_FALLBACK_IDS()),
         ),
       )
       .get();
@@ -144,6 +147,15 @@ async function tick(): Promise<void> {
     ensureDb();
     // G1 — resolve chain keys from the live ChainInfo map (stale-safe).
     await ensureSourceChainMapFresh();
+    // ── P3 fix (candidate starvation — the auto-attest root cause) ───────────
+    // The old query was `orderBy(desc(createdAt)).limit(20)` with NO chain
+    // filter: the NEWEST 20 unattested rows (least likely to be attested
+    // yet, lag is 8-10 min) permanently occupied the window while payments
+    // settled on UNTRACKED chains (Base/Polygon/BSC — skipped only in JS)
+    // crowded out attestable rows entirely. Once 20 such rows existed,
+    // `groups` was empty on every tick and auto-attestation was dead.
+    // Fix: filter to tracked chains IN SQL, oldest-first (the window DRAINS —
+    // attestable rows leave the set), and apply the age cutoff in SQL too.
     const candidates = db
       .select()
       .from(payments)
@@ -154,14 +166,14 @@ async function tick(): Promise<void> {
           ne(payments.txHash, ""),
           ne(payments.txHash, "0x0"),
           isNull(payments.attestedAt),
+          inArray(payments.chainId, SOURCE_CHAINS_FALLBACK_IDS()),
+          gte(payments.createdAt, Date.now() - MAX_AGE_MS),
         ),
       )
-      .orderBy(desc(payments.createdAt))
+      .orderBy(asc(payments.createdAt))
       .limit(BATCH_LIMIT)
       .all();
-
-    const cutoff = Date.now() - MAX_AGE_MS;
-    const fresh = candidates.filter((row) => (row.createdAt ?? 0) >= cutoff);
+    const fresh = candidates;
 
     // G3 — group candidates by chainKey and try ONE getBatchProof call per
     // group (≤10 hashes): the builder returns a shared continuity proof that
@@ -202,6 +214,12 @@ async function tick(): Promise<void> {
   } finally {
     state.busy = false;
   }
+}
+
+/** One immediate poll pass — used by instrumentation at boot so the first
+ * attestations don't wait for the first 60s interval (P3 warm-up). */
+export async function pollOnce(): Promise<void> {
+  await tick();
 }
 
 interface BatchFlip {

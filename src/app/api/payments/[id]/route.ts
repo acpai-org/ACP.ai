@@ -31,23 +31,38 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
+  const existing = db.select().from(payments).where(eq(payments.id, id)).get();
+  if (!existing) {
+    return NextResponse.json({ error: "Payment not found." }, { status: 404 });
+  }
+
   const patch: Partial<PaymentInsert> = {};
-  if (typeof body.status === "string") patch.status = body.status;
+  // D15 fix: status is WHITELISTED (any arbitrary string used to land in the
+  // column and break every status predicate downstream), and "settled"
+  // requires a txHash — in this PATCH body or already on the row (the
+  // settling PATCH carries it).
+  const ALLOWED_STATUSES = ["pending", "signing", "settling", "settled", "failed"] as const;
+  if (typeof body.status === "string") {
+    if (!(ALLOWED_STATUSES as readonly string[]).includes(body.status)) {
+      return NextResponse.json({ error: `status must be one of: ${ALLOWED_STATUSES.join(", ")}` }, { status: 400 });
+    }
+    if (body.status === "settled" && typeof body.txHash !== "string" && !existing.txHash) {
+      return NextResponse.json({ error: "settled requires a txHash." }, { status: 400 });
+    }
+    patch.status = body.status;
+  }
   if (typeof body.txHash === "string") patch.txHash = body.txHash;
   if (typeof body.chainId === "number") patch.chainId = body.chainId;
   if (typeof body.senderAddress === "string") patch.senderAddress = body.senderAddress;
   if (typeof body.tokenAddress === "string") patch.tokenAddress = body.tokenAddress;
-  if (body.status === "settled" || body.status === "failed") {
+  // D15: settledAt stamps only a real settlement (the old code stamped it for
+  // "failed" too).
+  if (body.status === "settled") {
     patch.settledAt = Date.now();
   }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "No updatable fields." }, { status: 400 });
-  }
-
-  const existing = db.select().from(payments).where(eq(payments.id, id)).get();
-  if (!existing) {
-    return NextResponse.json({ error: "Payment not found." }, { status: 404 });
   }
 
   db.update(payments).set(patch).where(eq(payments.id, id)).run();

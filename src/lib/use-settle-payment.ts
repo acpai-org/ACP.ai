@@ -5,17 +5,15 @@ import { erc20Abi, type Address, type Hash } from "viem";
 import { useAccount, usePublicClient, useSendTransaction, useWriteContract } from "wagmi";
 import { useCreatePayment, useUpdatePayment } from "@/lib/api";
 import type { PaymentIntent } from "@/lib/types";
-import { getChainByChainId } from "@/lib/chains";
+// N7 fix: import from the REAL chain registry (all chains, all tokens). The
+// legacy @/lib/chains module only knew Sepolia (stablecoin: null!) and
+// Ethereum mainnet — every USDC intent-card payment on Sepolia/Base/Arbitrum/
+// OP/Polygon/BNB/Creditcoin failed with "USDC has no contract address on …".
+import { getChainByChainId } from "@/lib/chains/registry";
 
 function networkLabel(chainId: number): string {
-  switch (chainId) {
-    case 11155111:
-      return "Ethereum Sepolia";
-    case 1:
-      return "Ethereum Mainnet";
-    default:
-      return `Chain ${chainId}`;
-  }
+  const chain = getChainByChainId(chainId);
+  return chain ? chain.name : `Chain ${chainId}`;
 }
 
 export type StepContext = {
@@ -70,7 +68,6 @@ export function useSettlePayment() {
           return { id: "", status: "pending", reason: "no-wallet" };
         }
 
-        const isStablecoinToken = intent.token === "USDC" || intent.token === "USDC.e";
         const isNativeToken = intent.token === "ETH";
 
         // Payments execute on the wallet's currently connected chain. The
@@ -82,19 +79,21 @@ export function useSettlePayment() {
 
         // Resolve the ERC-20 contract address for non-native tokens.
         // - custom token: the token symbol IS the contract address (user/AI provided)
-        // - USDC-style: resolve from the chain config when known
-        // TODO(phase-2): token resolution will move into the Attestcoin
-        // Protocol intent model (GLC/USC style assets) — keep this simple for now.
+        // - registry tokens: resolve from the chain's token list (symbol,
+        //   case-insensitive; native tokens are also listed as entries)
+        // N7 fix: the registry knows USDC (and friends) on every supported
+        // chain — the legacy two-chain module made this fail everywhere but
+        // Ethereum mainnet.
         let erc20TokenAddress: Address | null = null;
         if (!isNativeToken) {
           if (/^0x[a-fA-F0-9]{40}$/.test(intent.token)) {
             erc20TokenAddress = intent.token as Address;
-          } else if (chainConfig?.stablecoin && isStablecoinToken) {
-            erc20TokenAddress = chainConfig.stablecoin.address;
           } else {
-            const known = chainConfig?.stablecoin;
-            if (known && known.symbol.toUpperCase() === intent.token.toUpperCase()) {
-              erc20TokenAddress = known.address;
+            const known = chainConfig?.tokens.find(
+              (t) => t.symbol.toUpperCase() === intent.token.toUpperCase(),
+            );
+            if (known) {
+              erc20TokenAddress = known.address as Address;
             }
           }
         }

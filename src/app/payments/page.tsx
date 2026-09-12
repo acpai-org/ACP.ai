@@ -28,6 +28,7 @@ import {
   UserPlus,
   UserRound,
   Repeat,
+  FileSpreadsheet,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { PageContainer } from "@/components/page-container";
@@ -41,6 +42,8 @@ import { CertificateVerifier } from "@/components/certificate-verifier";
 import { FileSearch } from "lucide-react";
 import { shortenAddress } from "@/lib/format";
 import { explorerTxUrl, explorerAddressUrl, networkName, getUsdc } from "@/lib/wagmi/chains";
+import { getChainByChainId } from "@/lib/chains/registry";
+import { rovingKeydown } from "@/lib/roving";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { useFormatters } from "@/lib/use-formatters";
 import { useAskAgent } from "@/lib/use-ask-agent";
@@ -67,6 +70,24 @@ const FILTERS: { label: string; value: FilterStatus }[] = [
   { label: "Settled", value: "settled" },
   { label: "Pending", value: "pending" },
   { label: "Failed", value: "failed" },
+];
+
+// R29 (round-5 feature): date-range presets for the payments table — the
+// same chip language as the Actions view's R23 time windows (a payments list
+// is recency-shaped, so quick ranges beat a date picker). The cutoff is
+// anchored at chip-selection time (a user event — the only legal Date.now()
+// site) so rows never flicker in/out of the window mid-session.
+type RangeFilter = "all" | "24h" | "7d" | "30d";
+const RANGE_MS: Record<Exclude<RangeFilter, "all">, number> = {
+  "24h": 86_400_000,
+  "7d": 604_800_000,
+  "30d": 2_592_000_000,
+};
+const RANGE_FILTERS: { value: RangeFilter; key: "payments.rangeAll" | "payments.range24h" | "payments.range7d" | "payments.range30d" }[] = [
+  { value: "all", key: "payments.rangeAll" },
+  { value: "24h", key: "payments.range24h" },
+  { value: "7d", key: "payments.range7d" },
+  { value: "30d", key: "payments.range30d" },
 ];
 
 function isPendingStatus(status: string) {
@@ -777,7 +798,7 @@ function WatcherStrip({
 function PaymentsPageInner() {
   const { t } = useI18n();
   const askAgent = useAskAgent();
-  const { data, isLoading, isFetching, refetch } = usePayments();
+  const { data, isLoading, isFetching, refetch, dataUpdatedAt } = usePayments();
   const payments = data?.payments;
   // R13-B: contacts for the empty-state quick actions (shared query key —
   // free after any visit to the contacts page, one local read otherwise).
@@ -791,6 +812,28 @@ function PaymentsPageInner() {
   const submitBatch = useSubmitAttestationBatch();
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [sortBy, setSortBy] = useState<"recent" | "amount">("recent");
+  // R29: range filter with its time anchor captured in the SELECT handler
+  // (a user event) — cutoff stays stable for the session, memo stays pure.
+  const [range, setRange] = useState<{ filter: RangeFilter; anchor: number }>({ filter: "all", anchor: 0 });
+  const selectRange = useCallback((r: RangeFilter) => {
+    setRange(r === "all" ? { filter: "all", anchor: 0 } : { filter: r, anchor: Date.now() });
+  }, []);
+  // R30: chip-row focus refs for the roving-tabindex keyboard navigation
+  // (shared helper — same pattern the Actions view uses since R28).
+  // R34: the refs now cover the attest-lens chips TOO (they sit in the same
+  // row after the divider), so arrows flow through all 7 chips; the range
+  // row gets its own refs below.
+  const statusRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const rangeRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  // R32: transient success state on the CSV export button.
+  const [exportedCsv, setExportedCsv] = useState(false);
+  // R31: one-tap reset for the status + range lenses (the actions view has
+  // had one since round-3; payments previously relied on clicking each
+  // "All" chip separately).
+  const clearFilters = useCallback(() => {
+    setFilter("all");
+    setRange({ filter: "all", anchor: 0 });
+  }, []);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [verifierOpen, setVerifierOpen] = useState(false);
   const [syncingPaymentId, setSyncingPaymentId] = useState<string | null>(null);
@@ -950,9 +993,13 @@ function PaymentsPageInner() {
 
   const sorted = useMemo(() => {
     const hasTx = (p: PaymentDbType) => !!p.txHash && p.txHash !== "0x0" && p.txHash !== "";
+    // R29: the range cutoff computed once from the SELECT-time anchor — pure
+    // for react-compiler, stable for the session (no mid-render clock reads).
+    const cutoff = range.filter === "all" ? 0 : range.anchor - RANGE_MS[range.filter];
     // Source = the WHO-lens base (contactRows): the status predicate runs on
     // the SAME rows the census counted, under either lens.
     const list = contactRows.filter((p) => {
+      if (cutoff > 0 && p.createdAt < cutoff) return false;
       if (deferredFilter === "all") return true;
       if (deferredFilter === "pending") return isPendingStatus(p.status);
       // Attestation-state lens — settled payments with a broadcast tx only.
@@ -966,9 +1013,81 @@ function PaymentsPageInner() {
         return parseFloat(b.amountHuman) - parseFloat(a.amountHuman);
       return b.createdAt - a.createdAt;
     });
-  }, [contactRows, deferredFilter, deferredSort]);
+  }, [contactRows, deferredFilter, deferredSort, range]);
+
+  // R29: only offer time-window chips when the list actually spans more than
+  // 24h (a fresh list needs no range dimension — same "only when meaningful"
+  // rule as everywhere else). The observation time is the query's own
+  // dataUpdatedAt (pure render input, re-anchored every refetch).
+  const showRangeChips = useMemo(
+    () =>
+      dataUpdatedAt > 0 &&
+      contactRows.some((p) => dataUpdatedAt - p.createdAt > RANGE_MS["24h"]),
+    [contactRows, dataUpdatedAt],
+  );
 
   const handleRefresh = useCallback(() => refetch(), [refetch]);
+
+  /** R32: CSV export of the payments table — the same RFC 4180 + BOM recipe
+   * as the actions-log CSV (spreadsheet-friendly for compliance review).
+   * Exports the FULL row set the census counted (rows, not the filtered
+   * view) so the numbers in the file always agree with the page's chips. */
+  const handleExportCsv = useCallback(() => {
+    if (rows.length === 0) return;
+    const cell = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, "\"\"")}"` : v);
+    const header = [
+      "time_iso",
+      "id",
+      "status",
+      "recipient",
+      "recipient_address",
+      "token",
+      "amount",
+      "chain",
+      "chain_id",
+      "memo",
+      "tx_hash",
+      "settled_at",
+      "attested_at",
+      "attest_root",
+      "onchain_verified_at",
+      "cc3_tx_hash",
+    ].join(",");
+    const lines = rows.map((p) =>
+      [
+        new Date(p.createdAt).toISOString(),
+        p.id,
+        p.status,
+        p.recipientLabel ?? "",
+        p.recipientAddress,
+        p.token,
+        p.amountHuman,
+        getChainByChainId(p.chainId)?.shortName ?? "",
+        p.chainId != null ? String(p.chainId) : "",
+        p.memo ?? "",
+        p.txHash ?? "",
+        p.settledAt != null ? new Date(p.settledAt).toISOString() : "",
+        p.attestedAt != null ? new Date(p.attestedAt).toISOString() : "",
+        p.attestRoot ?? "",
+        p.onchainVerifiedAt != null ? new Date(p.onchainVerifiedAt).toISOString() : "",
+        p.cc3TxHash ?? "",
+      ]
+        .map(cell)
+        .join(","),
+    );
+    // BOM so Excel infers UTF-8 when memos/labels carry CJK text.
+    const blob = new Blob(["\uFEFF" + header + "\n" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `acp-payments-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setExportedCsv(true);
+    setTimeout(() => setExportedCsv(false), 1500);
+  }, [rows]);
 
   const handleToggleSort = useCallback(
     () => setSortBy((s) => (s === "recent" ? "amount" : "recent")),
@@ -1134,13 +1253,22 @@ function PaymentsPageInner() {
           </div>
         ) : null}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {FILTERS.map((f) => {
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={t("payments.statusGroup")}>
+            {FILTERS.map((f, i) => {
               const isActive = filter === f.value;
               return (
                 <button
                   key={f.value}
                   type="button"
+                  ref={(el) => {
+                    statusRefs.current[i] = el;
+                  }}
+                  tabIndex={isActive ? 0 : -1}
+                  onKeyDown={(e) =>
+                    // R34: count covers the WHOLE row (status + attest chips
+                    // share statusRefs) so arrows flow across the divider.
+                    rovingKeydown(e, i, FILTERS.length + ATTEST_FILTERS.length, statusRefs)
+                  }
                   onClick={() => setFilter(f.value)}
                   aria-pressed={isActive}
                   className={cn(
@@ -1171,15 +1299,23 @@ function PaymentsPageInner() {
             })}
             {/* Attestation-state lens — visually separated from the status filters */}
             <span aria-hidden className="mx-1 hidden h-4 w-px bg-border sm:inline-block" />
-            {ATTEST_FILTERS.map((f) => {
+            {ATTEST_FILTERS.map((f, i) => {
               const Icon = f.icon;
               const isActive = filter === f.value;
+              const idx = FILTERS.length + i; // R34: continues the status row's refs
               return (
                 <button
                   key={f.value}
                   type="button"
+                  tabIndex={isActive ? 0 : -1}
+                  onKeyDown={(e) => rovingKeydown(e, idx, FILTERS.length + ATTEST_FILTERS.length, statusRefs)}
                   onClick={() => setFilter(isActive && filter === f.value ? "all" : f.value)}
                   aria-pressed={isActive}
+                  ref={(el) => {
+                    // R34: registers into the SAME refs array as the status
+                    // chips — one roving row of 7.
+                    statusRefs.current[idx] = el;
+                  }}
                   className={cn(
                     "inline-flex min-h-9 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60",
                     isActive
@@ -1201,6 +1337,20 @@ function PaymentsPageInner() {
             })}
           </div>
           <div className="flex items-center gap-2">
+            {/* R32: CSV export of the payments table (RFC 4180 + BOM, same
+                recipe as the actions-log CSV). Wires the round-1 i18n keys
+                that had no UI until now. */}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleExportCsv}
+              disabled={rows.length === 0 || exportedCsv}
+              title={rows.length === 0 ? t("payments.exportCsvEmpty") : t("payments.exportCsv")}
+              className="hit-slop h-8 gap-1.5 text-xs transition-colors hover:border-primary/30 hover:text-primary"
+            >
+              {exportedCsv ? <Check className="h-3.5 w-3.5 text-success" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
+              {t("payments.exportCsv")}
+            </Button>
             <Button
               variant="secondary"
               size="sm"
@@ -1217,12 +1367,65 @@ function PaymentsPageInner() {
               <FileSearch className="h-3.5 w-3.5" />
               {t("payments.verifyCertificate")}
             </Button>
-            <Button variant="secondary" size="sm" onClick={handleToggleSort}>
+            <Button variant="secondary" size="sm" onClick={handleToggleSort} title={t("payments.sortHint")}>
               <ArrowUpDown className="h-3.5 w-3.5" />
               {sortBy === "recent" ? t("payments.sortRecent") : t("payments.sortHighest")}
             </Button>
           </div>
         </div>
+        {/* R31: one-tap reset + narrowing indicator — only when the status
+            or range lens actually hides rows (same "only when meaningful"
+            rule as everywhere else). */}
+        {(filter !== "all" || range.filter !== "all") && contactRows.length > 0 ? (
+          <div className="mt-2.5 flex items-center justify-between gap-2 px-0.5">
+            <span className="text-[10px] text-muted-2" aria-live="polite">
+              {t("payments.showing", { shown: String(sorted.length), total: String(contactRows.length) })}
+            </span>
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="hit-slop flex min-h-7 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[10px] font-medium text-muted-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+            >
+              <X className="h-2.5 w-2.5" aria-hidden />
+              {t("payments.clearFilters")}
+            </button>
+          </div>
+        ) : null}
+        {/* R29 (round-5 feature): date-range preset chips — same visual
+            language as the Actions view's time windows; only rendered when
+            the list actually spans more than 24h. */}
+        {showRangeChips ? (
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5" role="group" aria-label={t("payments.rangeGroup")}>
+            {RANGE_FILTERS.map((r, i) => {
+              const isActive = range.filter === r.value;
+              return (
+                <button
+                  key={r.value}
+                  type="button"
+                  tabIndex={isActive ? 0 : -1}
+                  onKeyDown={(e) => rovingKeydown(e, i, RANGE_FILTERS.length, rangeRefs)}
+                  onClick={() => selectRange(r.value)}
+                  aria-pressed={isActive}
+                  ref={(el) => {
+                    // R34: roving tabindex on the range row (own refs — it's
+                    // a separate row, the pattern the status row has since
+                    // R30 and the Actions view since R28).
+                    rangeRefs.current[i] = el;
+                  }}
+                  className={cn(
+                    "flex min-h-8 items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60",
+                    isActive
+                      ? "bg-foreground/10 text-foreground ring-1 ring-inset ring-foreground/20"
+                      : "glass-item text-muted-2 hover:text-foreground",
+                  )}
+                >
+                  {r.value !== "all" ? <Clock className="h-2.5 w-2.5 opacity-60" aria-hidden /> : null}
+                  {t(r.key)}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         {/* Attestcoin watcher liveness — same heartbeat as the wallet panel,
             surfaced where the awaiting-attest filter lives. */}
         {poller && poller.running ? <WatcherStrip poller={poller} /> : null}
@@ -1395,7 +1598,11 @@ function PaymentsPageInner() {
                 ) : (
                   <Link
                     href="/contacts"
-                    className="glass-item flex min-h-9 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-muted transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                    // S11-d (round-6 styling, VLM-guided): this chip is the
+                    // ONLY path forward on the zero-contact empty state, but
+                    // it rendered at text-muted contrast — easy to miss. Now
+                    // primary-tinted like every other forward affordance.
+                    className="flex min-h-9 items-center gap-1.5 rounded-full border border-primary/25 bg-primary/[0.06] px-3 py-1.5 text-xs font-medium text-primary transition-all duration-200 hover:border-primary/50 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                   >
                     <UserPlus className="h-3 w-3" aria-hidden />
                     {t("payments.emptyAddContactChip")}

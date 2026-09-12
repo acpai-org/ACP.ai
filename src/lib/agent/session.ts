@@ -69,6 +69,10 @@ export function bindRun(sessionId: string, runId: string): void {
     p.reject(new Error("run superseded"));
     s.pending.delete(id);
   }
+  // The previous run's callId→action bindings are dead too — a new run owns
+  // the channel. Without this the map grows unboundedly for the session's
+  // lifetime (one entry per executed tool call).
+  s.callActions.clear();
 }
 
 /** Register a parked wait. Resolves when the client POSTs a respond, or on timeout/abort. */
@@ -123,12 +127,26 @@ export function awaitResponse<T extends "tool" | "confirmation">(
   }) as Promise<T extends "tool" ? ToolClientResult : { approved: boolean; rememberChoice?: boolean }>;
 }
 
-/** POST /api/agent/respond handler resolves a parked wait. */
-export function resolveResponse(sessionId: string, callId: string, payload: ToolClientResult | { approved: boolean; rememberChoice?: boolean }): boolean {
+/** POST /api/agent/respond handler resolves a parked wait.
+ *
+ * F2 fix (kind isolation): a confirmation wait and the tool wait that follows
+ * it REUSE the same callId (the loop parks the confirmation first, then the
+ * tool dispatch under the same id). A kind-blind resolve let a late/duplicate
+ * confirmation POST resolve the parked TOOL wait with `{approved:true}` —
+ * producing `ok:undefined` garbage outcomes and corrupting the run. The kind
+ * must match: mismatched payloads are refused (returns false) so the caller
+ * can answer 409 honestly. */
+export function resolveResponse(
+  sessionId: string,
+  callId: string,
+  kind: "tool" | "confirmation",
+  payload: ToolClientResult | { approved: boolean; rememberChoice?: boolean },
+): boolean {
   const s = sessions().get(sessionId);
   if (!s) return false;
   const p = s.pending.get(callId);
   if (!p) return false;
+  if (p.kind !== kind) return false;
   p.resolve(payload as ToolClientResult);
   return true;
 }

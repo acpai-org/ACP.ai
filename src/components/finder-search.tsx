@@ -75,7 +75,15 @@ export function FinderSearch({
     <form
       role="search"
       onSubmit={handleSubmit}
-      className={cn("neumorphic-inset flex items-center gap-2.5 rounded-2xl px-3.5 py-2 transition-shadow duration-300", className)}
+      // S12-c (round-7 styling, VLM-guided): the finder read as "disabled
+      // text" before focus — the neumorphic-inset shadows vanish on the dark
+      // page background. Same resting treatment the chat composer got in
+      // S10-a: a visible inset ring so the field reads as an input BEFORE
+      // focus (the neumorphic gradient + inset shadows stay for depth).
+      className={cn(
+        "neumorphic-inset flex items-center gap-2.5 rounded-2xl px-3.5 py-2 transition-shadow duration-300 ring-1 ring-inset ring-foreground/[0.09]",
+        className,
+      )}
       aria-label={ariaLabel}
     >
       <span

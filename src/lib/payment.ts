@@ -1,4 +1,4 @@
-import { isAddress, parseUnits } from "viem";
+import { getAddress, isAddress, parseUnits } from "viem";
 import type { PaymentInsert, ContactInsert } from "@/db/schema";
 
 export type PaymentStatus =
@@ -64,7 +64,10 @@ export function validateCreatePayment(
   const chainId =
     typeof input.chainId === "number" && input.chainId > 0
       ? input.chainId
-      : 133;
+      : // D13 fix: 133 is not a real chain — rows defaulted there broke sync,
+        // attestation and explorer links. Sepolia (11155111) matches the
+        // schema's column default and is the app's demo chain.
+        11155111;
 
   const data: PaymentInsert = {
     id: newPaymentId(),
@@ -109,7 +112,11 @@ export function validateCreateContact(
   const data: ContactInsert = {
     id: newContactId(),
     label,
-    address,
+    // D14 fix: store CHECKSUMMED. The old code stored the input as-is, so a
+    // lowercase recipient from the model/executor silently failed the
+    // case-sensitive `lastUsed` bump (contacts stopped sorting by recent
+    // use) and duplicate detection across casing variants.
+    address: getAddress(address),
     note: input.note?.trim() || "",
     favorite: input.favorite ?? false,
     // 0 = never used — "last used" flips on the first real payment dispatch

@@ -266,6 +266,13 @@ export function useAgentRun() {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        // F2 fix (stream death): a clean reader end WITHOUT a run_finished
+        // event means the stream died server-side (route maxDuration kill,
+        // container recycle, proxy timeout) — the loop never got to emit its
+        // terminal event. Without this flag the old code just called
+        // finalizeAll() and returned success, leaving in-flight trace steps
+        // spinning "running" forever and no error surfaced.
+        let sawRunFinished = false;
 
         const dispatchTool = async (
           callId: string,
@@ -430,6 +437,11 @@ export function useAgentRun() {
           }
 
           if (!delivered) {
+            // F2 fix (zombie dispatch): if the run was aborted while the
+            // executor was in flight, the abort path already finalized every
+            // surface — narrating post-mortem or cancelling the (dead) reader
+            // again would only write into an interrupted conversation.
+            if (opts.signal?.aborted) return;
             // In serverless environments like Vercel, the response handler runs in a separate
             // container and cannot resolve the in-memory promise in the streaming container.
             // Cancel the hanging stream and surface the result narration directly — in
@@ -477,6 +489,16 @@ export function useAgentRun() {
               case "text": {
                 const tid = routeText();
                 patchMsg(tid, (m) => ({ ...m, content: (m.content ?? "") + evt.text }));
+                break;
+              }
+              case "text_done": {
+                // F2 fix: the server emits this when a narration beat
+                // completes — finalize that message's streaming cursor so the
+                // typing indicator stops the instant the beat is done (not at
+                // the next step or run end).
+                if (textMsgId) {
+                  patchMsg(textMsgId, (m) => (m.streaming ? { ...m, streaming: false } : m));
+                }
                 break;
               }
               case "step_started": {
@@ -547,6 +569,7 @@ export function useAgentRun() {
                 break;
               }
               case "run_finished":
+                sawRunFinished = true;
                 patch((m) => ({
                   ...m,
                   streaming: false,
@@ -569,6 +592,37 @@ export function useAgentRun() {
           }
         }
         finalizeAll();
+        if (!sawRunFinished) {
+          // F2 fix (stream death): the stream ended WITHOUT the terminal
+          // run_finished event — the server cut the connection before the
+          // loop completed (route maxDuration cap, container recycle, proxy
+          // timeout). Finalize every surface with an honest error, flip
+          // non-terminal trace steps to "unknown", and surface an error line
+          // instead of silently returning success with steps spinning.
+          markRunDone("error");
+          if (traceMsgId && sid) {
+            const traceMsg = useChatStore.getState().sessions[sid]?.messages.find((m) => m.id === traceMsgId);
+            if (traceMsg?.trace?.length) {
+              patchMsg(traceMsgId, (m) => ({
+                ...m,
+                trace: (m.trace ?? []).map((st) =>
+                  st.status === "running" || st.status === "awaiting_signature" || st.status === "broadcast" || st.status === "confirming"
+                    ? { ...st, status: "unknown", finishedAt: Date.now() }
+                    : st,
+                ),
+              }));
+            }
+          }
+          const leadMsg = sid ? useChatStore.getState().sessions[sid]?.messages.find((m) => m.id === opts.assistantMessageId) : undefined;
+          if (leadMsg && !leadMsg.content.trim()) {
+            patchMsg(opts.assistantMessageId, (m) => ({
+              ...m,
+              content: m.content || t("chat.errorEncountered", { error: "The agent stream ended unexpectedly (server cut the connection before the run completed)." }),
+            }));
+          }
+          cleanupEmptyTextBeats();
+          return { error: "Agent stream ended without a completion signal.", errorCode: "stream-died", aborted: false };
+        }
         return { error: null, errorCode: null, aborted: false };
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {

@@ -30,6 +30,10 @@ export interface TxAttestation {
 const POLL_MS = 20_000;
 /** Give up polling after this long without a proof (the card keeps the last state). */
 const MAX_POLL_MS = 15 * 60_000;
+/** N11: bound each HTTP request — a hung /api/attestcoin/proof would park the
+ * poller's in-flight check forever (the interval keeps firing but every check
+ * early-returns nothing). */
+const CHECK_TIMEOUT_MS = 12_000;
 
 export function useAttestationForTx(
   txHash?: string,
@@ -47,7 +51,7 @@ export function useAttestationForTx(
     try {
       const res = await fetch(
         `/api/attestcoin/proof?evmChainId=${chain}&txHash=${hash}`,
-        { cache: "no-store" },
+        { cache: "no-store", signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) },
       );
       if (res.status === 404) {
         const body = (await res.json().catch(() => ({}))) as { state?: string };
@@ -58,7 +62,11 @@ export function useAttestationForTx(
         }
       }
       if (!res.ok) {
-        setResult((prev) => (prev.phase === "attested" ? prev : { phase: "unavailable", checkedAt: Date.now() }));
+        // N12: a transient failure (502/503 from a hiccuping builder) must not
+        // flip the phase to "unavailable" mid-poll — the next interval tick
+        // retries. Only a persistent failure (budget exhaustion, handled
+        // above) ends the poll, and that stays "pending" honestly.
+        setResult((prev) => (prev.phase === "attested" ? prev : prev.phase === "checking" ? { phase: "pending", checkedAt: Date.now() } : prev));
         return;
       }
       const data = (await res.json()) as {
@@ -79,10 +87,13 @@ export function useAttestationForTx(
       } else if (data.state === "pending" || data.state === "unknown_tx") {
         setResult({ phase: "pending", dashboardUrl: data.dashboard, checkedAt: Date.now() });
       } else {
-        setResult((prev) => (prev.phase === "attested" ? prev : { phase: "unavailable", checkedAt: Date.now() }));
+        // N12: keep the pending phase on an "error" state — the server-side
+        // poller remains the long-running authority.
+        setResult((prev) => (prev.phase === "attested" ? prev : { phase: "pending", dashboardUrl: data.dashboard, checkedAt: Date.now() }));
       }
     } catch {
-      setResult((prev) => (prev.phase === "attested" ? prev : { phase: "unavailable", checkedAt: Date.now() }));
+      // N12: network throw — same treatment: stay pending, next tick retries.
+      setResult((prev) => (prev.phase === "attested" ? prev : prev.phase === "checking" ? { phase: "pending", checkedAt: Date.now() } : prev));
     }
   }, []);
 
@@ -105,7 +116,16 @@ export function useAttestationForTx(
       if (Date.now() - startedAtRef.current > MAX_POLL_MS) {
         clearInterval(timer);
         doneRef.current = true;
-        setResult((prev) => (prev.phase === "attested" ? prev : { phase: "unavailable", checkedAt: prev.checkedAt }));
+        // N12 fix: budget exhausted ≠ attestation failed. The server-side
+        // Attestcoin poller keeps watching for up to 14 DAYS and flips the
+        // payment row + fires a notification when the proof lands. The old
+        // code latched "unavailable", which the intent-card timeline rendered
+        // as attestation SKIPPED — a real attestation minutes later looked
+        // like the feature was broken. Keep the honest "pending" state (the
+        // poll simply stops burning client requests).
+        setResult((prev) =>
+          prev.phase === "attested" ? prev : { phase: "pending", dashboardUrl: prev.dashboardUrl, checkedAt: prev.checkedAt },
+        );
         return;
       }
       void check(txHash, evmChainId);

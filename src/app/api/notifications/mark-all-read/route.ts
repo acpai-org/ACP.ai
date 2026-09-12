@@ -44,7 +44,9 @@ export async function POST(req: Request) {
     db.update(notifications).set({ read: true }).where(eq(notifications.read, false)).run();
     return NextResponse.json({ ok: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    // D16 fix: log the detail server-side; the response carries a generic
+    // message (raw Error.message can leak filesystem paths in stack traces).
+    console.error("[api/notifications] failed:", err);
+    return NextResponse.json({ error: "An internal error occurred." }, { status: 500 });
   }
 }

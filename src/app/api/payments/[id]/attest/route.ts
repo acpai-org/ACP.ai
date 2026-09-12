@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { logAppAction } from "@/lib/agent/action-log";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, ensureDb } from "@/db";
 import { payments } from "@/db/schema";
 import { getTxProof } from "@/lib/attestcoin/proof";
 import { ensureSourceChainMapFresh, sourceChainByEvmId } from "@/lib/attestcoin/chains";
+import { cc3ChainId } from "@/lib/attestcoin/cc3-links";
 import { submissionAvailability, submissionEnv, submitProofOnChain } from "@/lib/attestcoin/submit";
 
 export const revalidate = 0;
@@ -57,6 +58,17 @@ export async function POST(_request: Request, { params }: RouteParams) {
     );
   }
 
+  // L1 fix (gas safety): only a SETTLED payment's transfer can be attested —
+  // anything else (pending/signing/settling/failed) has no confirmed on-chain
+  // inclusion to prove, and submitting it burns real Creditcoin gas on a tx
+  // the conditional UPDATE below would then refuse to persist.
+  if (row.status !== "settled") {
+    return NextResponse.json(
+      { ok: false, error: `Payment is not settled yet (status: ${row.status}) — only settled transfers can be submitted for attestation.` },
+      { status: 409 },
+    );
+  }
+
   // G1 — live chain-key resolution (never a wrong-chain answer on mainnet).
   await ensureSourceChainMapFresh();
   const chain = sourceChainByEvmId(row.chainId);
@@ -96,6 +108,26 @@ export async function POST(_request: Request, { params }: RouteParams) {
   }
 
   const result = await submitProofOnChain(outcome.raw);
+  if (!result.ok && result.cc3TxHash) {
+    // L4: the submission tx WAS broadcast but its receipt is unconfirmed.
+    // Persist the hash (idempotent, no onchainVerifiedAt — it is NOT
+    // verified) so a retry can't blindly double-submit; the user can watch
+    // the tx on the CC3 explorer.
+    db.update(payments)
+      .set({ cc3TxHash: result.cc3TxHash })
+      .where(and(eq(payments.id, row.id), eq(payments.status, "settled"), isNull(payments.cc3TxHash)))
+      .run();
+    return NextResponse.json(
+      {
+        ok: false,
+        unknown: true,
+        cc3TxHash: result.cc3TxHash,
+        error: "Submission broadcast but not yet confirmed on Creditcoin — do not resubmit blindly; check the tx first.",
+        detail: result.detail,
+      },
+      { status: 502 },
+    );
+  }
   if (!result.ok || !result.cc3TxHash) {
     return NextResponse.json(
       { ok: false, error: "On-chain submission failed.", detail: result.detail },
@@ -109,13 +141,15 @@ export async function POST(_request: Request, { params }: RouteParams) {
     .run();
   // P24: an on-chain Creditcoin submission (real gas, public verification
   // record) from the Payments page must be in the action log with its CC3 tx.
+  // L2 fix: the logged chainId must follow the ACTIVE environment (the old
+  // hardcoded 102031 is testnet — a mainnet deployment recorded wrong refs).
   logAppAction({
     tool: "submit_proof_onchain",
     params: { paymentId: row.id, sourceTxHash: row.txHash ?? null },
     status: "succeeded",
     summary: `Proof submitted on-chain for payment ${row.id.slice(0, 8)}… (verifyAndEmit via the app submission account, ${result.gasUsed ?? "?"} gas).`,
     riskClass: "deploy",
-    chainId: 102031,
+    chainId: cc3ChainId(submissionEnv()),
     cc3TxHash: result.cc3TxHash ?? null,
     sourceTxHash: row.txHash ?? null,
   });

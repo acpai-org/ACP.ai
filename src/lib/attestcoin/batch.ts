@@ -121,10 +121,15 @@ export async function fetchBatchProofs(
   try {
     const result = await builder.getBatchProof(txHashes);
     if (!result.success || !result.data) {
+      // N2 fix: the SDK does not throw — classify from the returned error
+      // string so a genuine builder outage (5xx/DNS) reports "error" while a
+      // not-attested-yet batch reports "pending" honestly.
+      const msg = result.error ?? "proof not available";
+      const pending = /404|not found|unknown|no proof|not attested/i.test(msg);
       return {
         ...empty,
-        state: "pending",
-        detail: result.error ?? "proof not available yet",
+        state: pending ? "pending" : "error",
+        detail: msg,
       };
     }
     const data = result.data;

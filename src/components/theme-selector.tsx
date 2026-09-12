@@ -28,7 +28,11 @@ export function ThemeSelector() {
     <div
       role="radiogroup"
       aria-label={t("settings.theme")}
-      className="grid grid-cols-[1.3fr_1fr_1fr] gap-1 rounded-xl border border-border bg-surface-2 p-1"
+      // S12-a (round-7 styling): the Toggle's verified-visible track recipe
+      // (bg-foreground/10 + inset ring-foreground/25) — the previous
+      // border-border/bg-surface-2 treatment is #1c1c1c on #121212, invisible
+      // at this scale in dark mode (same fix the FontSelector got in S11-b).
+      className="grid grid-cols-[1.3fr_1fr_1fr] gap-1 rounded-xl bg-foreground/10 p-1 ring-1 ring-inset ring-foreground/25"
     >
       {OPTIONS.map((opt) => {
         const Icon = opt.icon;

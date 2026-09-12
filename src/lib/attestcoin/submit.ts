@@ -5,7 +5,7 @@ import {
   type TransactionReceipt,
 } from "ethers";
 import { blockProver, proofProvider, utils } from "@gluwa/usc-sdk";
-import { attestcoinEndpoints, attestcoinEnv } from "./config";
+import { attestcoinEndpoints, attestcoinEnv, ATTESTCOIN_TIMEOUT_MS } from "./config";
 import { chunkByProtocolLimits, tryMergeProofs } from "./batch";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -121,6 +121,39 @@ function gasPctOfBlock(gasUsed: number | null): number | null {
   return utils.gas.gasAsPercentageOfMax(BigInt(gasUsed));
 }
 
+/** L4 fix: hard cap for receipt polling after broadcast. ethers' default has
+ * NO cap — a dropped/reorged tx would park the submission call forever. */
+const SUBMIT_RECEIPT_TIMEOUT_MS = 120_000;
+
+/** L4 fix: wait for the receipt with a deadline, recovering the hash when the
+ * receipt doesn't arrive — a BROADCAST tx must never be reported as a plain
+ * failure (a blind retry double-submits and pays gas twice). Returns the
+ * receipt, or { receipt: null, txHash } when broadcast-but-unconfirmed. */
+async function waitWithDeadline(
+  ctx: SendCtx,
+  tx: { hash: string; wait: (confirmations?: number, timeout?: number) => Promise<unknown> },
+): Promise<{ receipt: TransactionReceipt | null; txHash: string }> {
+  try {
+    const receipt = (await tx.wait(1, SUBMIT_RECEIPT_TIMEOUT_MS)) as TransactionReceipt | null;
+    return { receipt: receipt ?? null, txHash: tx.hash };
+  } catch {
+    // wait() threw (timeout/reorg/network) — the tx WAS broadcast; try ONE
+    // direct receipt lookup before declaring it unknown.
+    try {
+      const receipt = await Promise.race([
+        ctx.provider.getTransactionReceipt(tx.hash),
+        new Promise<null>((resolve) => {
+          const t = setTimeout(() => resolve(null), ATTESTCOIN_TIMEOUT_MS);
+          t.unref?.();
+        }),
+      ]);
+      return { receipt: (receipt ?? null) as TransactionReceipt | null, txHash: tx.hash };
+    } catch {
+      return { receipt: null, txHash: tx.hash };
+    }
+  }
+}
+
 export interface SubmitResult {
   ok: boolean;
   /** Creditcoin tx hash of the submission. */
@@ -159,9 +192,21 @@ export async function submitProofOnChain(raw: RawProof): Promise<SubmitResult> {
       raw.continuityProof as proofProvider.ContinuityProof,
       { gasLimit },
     );
-    const receipt = await tx.wait();
-    const cc3TxHash = typeof receipt?.hash === "string" ? receipt.hash : null;
-    const gasUsed = receipt?.gasUsed != null ? Number(receipt.gasUsed) : null;
+    // L4: bounded receipt wait + broadcast-hash recovery (no infinite park,
+    // no silent double-submit retries).
+    const { receipt, txHash: submittedHash } = await waitWithDeadline(ctx, tx as never);
+    if (!receipt) {
+      return {
+        ok: false,
+        cc3TxHash: submittedHash,
+        event: null,
+        gasUsed: null,
+        gasPctOfBlock: null,
+        detail: `Submission tx ${submittedHash} was BROADCAST but its receipt is not confirmed yet — do NOT blindly resubmit; check the tx on-chain first.`,
+      };
+    }
+    const cc3TxHash = typeof receipt.hash === "string" ? receipt.hash : submittedHash;
+    const gasUsed = receipt.gasUsed != null ? Number(receipt.gasUsed) : null;
 
     // Parse the TransactionVerified event from the receipt logs.
     let event: SubmitResult["event"] = null;
@@ -353,11 +398,13 @@ export async function submitProofGroupsOnChain(
           shared,
           { gasLimit },
         );
-        const receipt = await tx.wait();
+        // L4: bounded receipt wait (batch flavor).
+        const { receipt, txHash: batchTxHash } = await waitWithDeadline(ctx, tx as never);
         proofSource.push(source);
         if (receipt?.gasUsed != null) gasUsedTotal += Number(receipt.gasUsed);
         events.push(...parseVerifiedEvents(ctx.prover, receipt?.logs ?? []));
-        const cc3TxHash = typeof receipt?.hash === "string" ? receipt.hash : null;
+        const cc3TxHash =
+          typeof receipt?.hash === "string" ? receipt.hash : receipt ? batchTxHash : null;
         if (cc3TxHash) {
           for (const item of chunk) perPayment.push({ paymentId: item.paymentId, cc3TxHash });
         }
@@ -403,7 +450,7 @@ export async function submitProofGroupsOnChain(
 async function submitWithCtx(
   ctx: SendCtx,
   item: BatchSubmitItem,
-): Promise<{ receipt: TransactionReceipt | null }> {
+): Promise<{ receipt: TransactionReceipt | null; txHash: string | null }> {
   const roots = continuityLength(item.raw.continuityProof);
   const args = [
     item.raw.chainKey,
@@ -422,6 +469,7 @@ async function submitWithCtx(
     item.raw.continuityProof as proofProvider.ContinuityProof,
     { gasLimit },
   );
-  const receipt = await tx.wait();
-  return { receipt: (receipt ?? null) as TransactionReceipt | null };
+  // L4: bounded receipt wait + hash recovery (per-tx fallback flavor).
+  const { receipt, txHash } = await waitWithDeadline(ctx, tx as never);
+  return { receipt, txHash };
 }

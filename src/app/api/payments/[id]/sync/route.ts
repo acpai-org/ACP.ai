@@ -3,7 +3,11 @@ import { eq } from "drizzle-orm";
 import { createPublicClient, http, type Hash } from "viem";
 import { db, ensureDb } from "@/db";
 import { payments } from "@/db/schema";
-import { getChainByChainId } from "@/lib/chains";
+// N8 fix: the REAL chain registry (the legacy @/lib/chains module only knew
+// Sepolia + Ethereum mainnet, so the recovery sync — "re-check after the
+// receipt wasn't available" — refused to run for 7 of the 9 registry chains
+// and those payments stayed stuck in signing/settling forever).
+import { getChainByChainId } from "@/lib/chains/registry";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -49,7 +53,10 @@ export async function POST(_request: Request, { params }: RouteParams) {
   }
 
   try {
-    const client = createPublicClient({ transport: http(chainConfig.rpcUrl) });
+    // N8: snappy transport — bounded timeout, no retries (the caller polls).
+    const client = createPublicClient({
+      transport: http(chainConfig.rpcUrls[0], { timeout: 8_000, retryCount: 1 }),
+    });
     const receipt = await client.getTransactionReceipt({ hash: row.txHash as Hash });
 
     const finalStatus = receipt.status === "success" ? "settled" : "failed";

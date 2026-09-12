@@ -104,6 +104,11 @@ export function fireRecurringSchedule(id: string, bodyStatus = "fired"): Recurri
 
   // ── Advance the schedule (catch-up: ONE missed execution now, then the
   // next slot strictly after now — cadence resumes, no double-charging gaps).
+  // R18 fix: claim + advance + action-log insert are wrapped in ONE
+  // transaction. A crash between the claim UPDATE and this advance UPDATE
+  // left lastFireAt=now with an un-advanced schedule — the next tick then
+  // passed the 5s dedup window and fired the payment AGAIN (double dispatch
+  // of real funds). Atomicity removes the crash window entirely.
   const intervalSec = Math.floor(cadenceIntervalMs(row.cadence) / 1000);
   let nextSec = toSeconds(row.nextFireAt);
   // Guard: if the schedule was never due (manual "Run now"), the next slot
@@ -114,40 +119,43 @@ export function fireRecurringSchedule(id: string, bodyStatus = "fired"): Recurri
 
   const executions = row.executions + 1;
   const complete = executions >= row.maxExecutions;
-  db.update(recurringSchedules)
-    .set({
-      executions,
-      nextFireAt: nextSec,
-      active: complete ? false : true,
-      lastFireAt: nowSec,
-      lastStatus: complete ? "complete" : bodyStatus.slice(0, 40),
-    })
-    .where(eq(recurringSchedules.id, id))
-    .run();
+  const actionId = db.transaction(() => {
+    db.update(recurringSchedules)
+      .set({
+        executions,
+        nextFireAt: nextSec,
+        active: complete ? false : true,
+        lastFireAt: nowSec,
+        lastStatus: complete ? "complete" : bodyStatus.slice(0, 40),
+      })
+      .where(eq(recurringSchedules.id, id))
+      .run();
 
-  // ── Action-log row (user-visible on /wallet, same start→patch pattern).
+    // ── Action-log row (user-visible on /wallet, same start→patch pattern).
+    return startAction({
+      runId: `recurring-${row.id}-${Date.now().toString(36)}`,
+      tool: "recurring_payment",
+      params: {
+        scheduleId: row.id,
+        recipient: row.recipientAddress,
+        amount: row.amountHuman,
+        token: row.token,
+        chainId: row.chainId,
+        cadence: String(row.cadence),
+        execution: executions,
+        maxExecutions: row.maxExecutions,
+      },
+      riskClass: "funds",
+      chainId: row.chainId ?? null,
+      // The dispatched transfer still passes through the wallet signature
+      // gate — that shows up on this row (and in full on the loop's own rows).
+      confirmationRequired: true,
+    });
+  });
+  // The user-visible summary (kept outside the transaction — display copy).
   const chainName = row.chainId != null ? getChainByChainId(row.chainId)?.name ?? `chain ${row.chainId}` : null;
   const label = row.recipientLabel ? ` "${row.recipientLabel}"` : "";
   const summary = `Recurring payment${label} executed (${cadenceLabelEn(row.cadence)}): transfer ${row.amountHuman} ${row.token} to ${shortAddr(row.recipientAddress)}${chainName ? ` on ${chainName}` : ""}. Execution ${executions}/${row.maxExecutions}.${complete ? " Schedule complete." : ""}`;
-  const actionId = startAction({
-    runId: `recurring-${row.id}-${Date.now().toString(36)}`,
-    tool: "recurring_payment",
-    params: {
-      scheduleId: row.id,
-      recipient: row.recipientAddress,
-      amount: row.amountHuman,
-      token: row.token,
-      chainId: row.chainId,
-      cadence: String(row.cadence),
-      execution: executions,
-      maxExecutions: row.maxExecutions,
-    },
-    riskClass: "funds",
-    chainId: row.chainId ?? null,
-    // The dispatched transfer still passes through the wallet signature
-    // gate — that shows up on this row (and in full on the loop's own rows).
-    confirmationRequired: true,
-  });
   // P24 honesty: the transfer is DISPATCHED to the agent loop here — its true
   // outcome (wallet signature, broadcast, receipt) lands on the loop's own
   // action row. Recording "succeeded" claimed completion before the wallet

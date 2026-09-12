@@ -39,7 +39,11 @@ const globalForVerifier = globalThis as unknown as {
 };
 
 function cacheKey(raw: RawProof): string {
-  return `${raw.chainKey}:${raw.headerNumber}:${raw.merkleProof.root}`;
+  // L3 fix: the key must identify the TRANSACTION, not just the block. The old
+  // key (chainKey:headerNumber:merkleRoot) collided for two payments whose
+  // txs landed in the SAME block — the second payment reused the first's
+  // cached verdict AND its per-tx txIndex. txBytes (unique per tx) disambiguates.
+  return `${raw.chainKey}:${raw.headerNumber}:${raw.merkleProof.root}:${raw.txBytes.slice(0, 74)}`;
 }
 
 /**

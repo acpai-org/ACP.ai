@@ -106,10 +106,6 @@ function confirmationSummary(tool: string, args: Record<string, unknown>): strin
       return `Create the automation rule "${String(args.name ?? "?")}" (when its trigger fires, it ${String((args.action as { kind?: string } | undefined)?.kind) === "transfer" ? "will ask the wallet to sign a transfer" : "will send a notification"})`;
     case "delete_automation_rule":
       return `PERMANENTLY delete the automation rule ${String(args.ruleId ?? "?").slice(0, 12)}… — find it first with list_automation_rules if unsure`;
-    case "create_automation_rule":
-      return `Create the automation rule "${String(args.name ?? "?")}" (when its trigger fires, it ${String((args.action as { kind?: string } | undefined)?.kind) === "transfer" ? "will ask the wallet to sign a transfer" : "will send a notification"})`;
-    case "delete_automation_rule":
-      return `PERMANENTLY delete the automation rule ${String(args.ruleId ?? "?").slice(0, 12)}… — find it first with list_automation_rules if unsure`;
     case "submit_proof_onchain":
       return `Submit the Attestcoin proof for ${String(args.txHash ?? "").slice(0, 14)}… for on-chain verification on Creditcoin (spends the app submission account's gas; emits TransactionVerified)`;
     default:
@@ -259,16 +255,25 @@ export async function runAgentLoop(opts: AgentRunOptions): Promise<void> {
       }
       if (round === MAX_ROUNDS) {
         finishReason = "max_rounds";
-        emit({ type: "text", text: "\n\n(I've hit my step budget for this request — let's continue from here.)" });
+        emit({ type: "text", text: "\n\n(I've hit my step budget for this request — let's continue from here. The remaining steps I had queued were not started.)" });
         break;
       }
 
       llmMessages.push({ role: "assistant", content: resp.content, toolCalls: resp.toolCalls });
 
-      // Execute tool calls sequentially — wallet actions are serial by nature.
+      // ── F2 (ordering fix): execute ONE tool call per round ─────────────────
+      // The product contract is narrate → tool → narrate → tool (each action
+      // visible one at a time). parallel_tool_calls:false is requested from
+      // the provider, but providers that ignore or reject it can still emit
+      // multiple calls in one assistant message. Executing them back-to-back
+      // would batch the trace with no narration between actions — instead,
+      // run ONLY the first call; every additional call gets a corrective
+      // tool-role result (protocol-valid: every tool_call_id must receive a
+      // tool response) telling the model to re-issue it on its next turn.
       const outcomes = [];
-      for (const call of resp.toolCalls) {
-        const outcome = await executeToolCall(call, {
+      const first = resp.toolCalls[0];
+      if (first) {
+        const outcome = await executeToolCall(first, {
           runId,
           sessionId,
           wallet,
@@ -280,8 +285,23 @@ export async function runAgentLoop(opts: AgentRunOptions): Promise<void> {
         outcomes.push(outcome);
         llmMessages.push({
           role: "tool",
-          toolCallId: call.id,
-          toolName: call.name,
+          toolCallId: first.id,
+          toolName: first.name,
+          content: JSON.stringify(outcome),
+        });
+      }
+      for (const skipped of resp.toolCalls.slice(1)) {
+        const outcome: ToolOutcome = {
+          ok: false,
+          summary:
+            "Not executed: emit EXACTLY ONE tool call per reply so each action is narrated and run one at a time. Re-issue this call on your next turn.",
+          error: "not_executed_batch",
+        };
+        outcomes.push(outcome);
+        llmMessages.push({
+          role: "tool",
+          toolCallId: skipped.id,
+          toolName: skipped.name,
           content: JSON.stringify(outcome),
         });
       }

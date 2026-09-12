@@ -77,7 +77,15 @@ export function WalletButton({ boxed = true }: { boxed?: boolean }) {
         disabled={isPending}
         size="md"
         variant="secondary"
-        className={cn("shrink-0 h-10")}
+        // S10-b (round-5 styling, VLM-guided): "Connect Wallet" is THE primary
+        // CTA when disconnected, but the header rendered it as a bare ghost
+        // while the wallet panel renders a solid primary button — two
+        // different weights for the same action. Primary-tinted resting
+        // border (the payments batch-submit treatment) keeps it secondary-
+        // sized in the navbar while reading as the same action.
+        className={cn(
+          "shrink-0 h-10 gap-1.5 border-primary/30 text-primary transition-colors hover:border-primary/50 hover:bg-primary/10",
+        )}
         aria-label={t("wallet.connectAria")}
       >
         {isPending ? (

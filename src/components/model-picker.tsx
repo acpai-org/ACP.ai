@@ -37,12 +37,41 @@ export function ModelPicker({ config, activeSessionId, modelOverride, onOverride
 
   useEffect(() => {
     if (!open) return;
-    const rect = btnRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setDropdownPos({
-      left: rect.left,
-      bottom: window.innerHeight - rect.top + 8,
-    });
+    // S6 fix (deferred bug #2): the dropdown is a fixed-position portal, but
+    // its position was computed ONCE on open — a window resize, the mobile
+    // keyboard (visualViewport), or ANY inner-container scroll (the chat
+    // transcript, the sidebar) left it floating away from its trigger, and on
+    // narrow screens it could overflow past the right edge entirely.
+    // Recompute on all of those (rAF-throttled) and clamp to the viewport.
+    const recompute = () => {
+      const rect = btnRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const DROPDOWN_W = 320; // w-80
+      const left = Math.min(rect.left, Math.max(8, window.innerWidth - DROPDOWN_W - 8));
+      setDropdownPos({
+        left,
+        bottom: Math.max(8, window.innerHeight - rect.top + 8),
+      });
+    };
+    recompute();
+    let raf = 0;
+    const scheduled = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        recompute();
+      });
+    };
+    window.addEventListener("resize", scheduled);
+    window.visualViewport?.addEventListener("resize", scheduled);
+    // scroll events don't bubble — capture on window catches every inner scroller.
+    window.addEventListener("scroll", scheduled, true);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("resize", scheduled);
+      window.visualViewport?.removeEventListener("resize", scheduled);
+      window.removeEventListener("scroll", scheduled, true);
+    };
   }, [open]);
 
   function handleClose() {

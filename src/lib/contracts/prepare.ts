@@ -217,6 +217,15 @@ export async function prepareDeployment(
   if (args.mode === "custom") {
     const source = args.source ?? "";
     if (!source.trim()) return { ok: false, error: "Custom deployment requires Solidity source." };
+    // R19 fix: cap the source size BEFORE solc runs — solc compile is
+    // synchronous (blocks the whole Node event loop: every concurrent
+    // request/stream stalls for the compile duration) and an unbounded
+    // adversarial source could freeze the server for minutes. 128 KB is far
+    // beyond any sane single-contract source.
+    const MAX_CUSTOM_SOURCE_BYTES = 128 * 1024;
+    if (Buffer.byteLength(source, "utf8") > MAX_CUSTOM_SOURCE_BYTES) {
+      return { ok: false, error: `Custom source exceeds the ${MAX_CUSTOM_SOURCE_BYTES / 1024} KB limit. Split the contract or remove embedded data.` };
+    }
     if (!/pragma solidity/i.test(source)) return { ok: false, error: "Source is missing a pragma directive." };
     if (/^\s*pragma solidity\s+[^;]*0\.[0-6]/m.test(source)) {
       return { ok: false, error: "Solidity versions below 0.8 are not accepted (safety)." };

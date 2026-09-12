@@ -4,7 +4,10 @@
 // icons, contacts settled-totals chips, and the recurring empty-state chips
 // can all be exercised in a real browser. Run with node. Rows carry the QA
 // marker "R14QA" so the cleanup pass can delete exactly what this script
-// inserted.
+// inserted. IDEMPOTENT: any prior R14QA rows (contacts/payments/notifications
+// from an earlier run) are removed in the same transaction before inserting,
+// so re-running the seed never trips UNIQUE contacts.address/id constraints
+// and never accumulates stale rows — output state is identical on every run.
 import { openDb, runInTransaction } from "./qa-node-sqlite.mjs";
 import { randomUUID } from "node:crypto";
 
@@ -57,6 +60,15 @@ const insN = db.prepare(
 );
 
 runInTransaction(db, () => {
+  // Pre-seed guard (deferred #2 from round 3): remove any rows a previous
+  // run of this script left behind, in the same transaction as the inserts.
+  // Same predicates as qa-r14-cleanup.mjs; notifications first since their
+  // related_payment_id points at the payment rows deleted right after.
+  db.prepare(
+    "DELETE FROM notifications WHERE related_payment_id LIKE 'r14qa-%' OR (title = 'System check complete' AND message = 'Attestcoin watcher heartbeat OK')",
+  ).run();
+  db.prepare("DELETE FROM payments WHERE memo = 'R14QA' OR id LIKE 'r14qa-%'").run();
+  db.prepare("DELETE FROM contacts WHERE note = 'R14QA' OR id LIKE 'r14qa-%'").run();
   for (const c of contacts) insC.run(c.id, c.label, c.address, c.note, c.favorite, c.lastUsed);
   for (const p of payments) insP.run(p.id, p.label, p.addr, p.token, p.amount, p.base, p.status, p.tx, p.createdAt, p.status === "settled" ? p.createdAt + 60_000 : null);
   for (const n of notifications) insN.run(n.id, n.title, n.message, n.type, n.read, n.rel, n.createdAt);

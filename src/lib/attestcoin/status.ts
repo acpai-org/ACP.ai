@@ -153,10 +153,74 @@ export async function fetchAttestcoinStatus(): Promise<AttestcoinStatus> {
   };
 }
 
-/** Live status — fetched fresh on every call (the `force` argument is kept
- * for call compatibility with the route's ?force=1 and is now a no-op). */
-export async function getAttestcoinStatus(_force = false): Promise<AttestcoinStatus> {
-  return fetchAttestcoinStatus();
+// ── S5: short-TTL status snapshot ────────────────────────────────────────────
+// QA (round 2) measured /api/attestcoin/status at 1.8–2.4s per request — it
+// performs 1 + N attested-height eth_calls + N public source-RPC head reads,
+// and it is polled every 60s per open Wallet panel AND enriched per intent
+// card AND per proof-route call. The data's natural cadence is ~2 minutes
+// (attestation cadence), so a 30s server-side snapshot changes nothing the
+// user can perceive while cutting ~all redundant upstream calls. The route's
+// ?force=1 (the panel's manual Refresh button) and the test's
+// getAttestcoinStatus(true) bypass the cache entirely.
+const STATUS_TTL_MS = 30_000;
+
+interface StatusCacheState {
+  env: string;
+  at: number;
+  snapshot: AttestcoinStatus | null;
+  inFlight: Promise<AttestcoinStatus> | null;
+  /** Generation counter — lets the finally-block clear only ITS OWN slot
+   * without referencing the promise variable (TS definite-assignment). */
+  inFlightGen: number;
+}
+
+const globalForStatus = globalThis as unknown as {
+  __acpStatusCache?: StatusCacheState;
+};
+
+function statusCache(): StatusCacheState {
+  globalForStatus.__acpStatusCache ??= { env: "", at: 0, snapshot: null, inFlight: null, inFlightGen: 0 };
+  return globalForStatus.__acpStatusCache;
+}
+
+/** Live status with a 30s server-side snapshot (S5). `force` bypasses the
+ *  cache — the wallet panel's Refresh button and live tests want fresh data.
+ *  Concurrent callers share one in-flight fetch (single-flight). */
+export async function getAttestcoinStatus(force = false): Promise<AttestcoinStatus> {
+  const cache = statusCache();
+  const env = attestcoinEnv();
+  if (
+    !force &&
+    cache.env === env &&
+    cache.snapshot &&
+    Date.now() - cache.at < STATUS_TTL_MS
+  ) {
+    return cache.snapshot;
+  }
+  if (cache.inFlight && cache.env === env && !force) {
+    // Share one in-flight fetch (page loads hit this from several routes).
+    return cache.inFlight;
+  }
+  const gen = ++statusCache().inFlightGen;
+  const flight: Promise<AttestcoinStatus> = (async () => {
+    try {
+      const snapshot = await fetchAttestcoinStatus();
+      const s = statusCache();
+      s.env = env;
+      s.at = Date.now();
+      s.snapshot = snapshot;
+      return snapshot;
+    } finally {
+      // Only clear OUR generation — a force refresh may have replaced the slot.
+      const s = statusCache();
+      if (s.inFlightGen === gen) {
+        s.inFlight = null;
+      }
+    }
+  })();
+  cache.inFlight = flight;
+  cache.env = env;
+  return flight;
 }
 
 // ── Attestation bounds (C2 / G6) ──────────────────────────────────────────────

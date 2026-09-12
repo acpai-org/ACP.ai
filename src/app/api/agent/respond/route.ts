@@ -68,7 +68,9 @@ export async function POST(req: Request) {
         headers: { "content-type": "application/json" },
       });
     }
-    const delivered = resolveResponse(body.sessionId, body.callId, result);
+    // F2 fix: pass the KIND so resolveResponse can refuse a mismatched payload
+    // (a late confirmation answering a parked tool wait, or vice versa).
+    const delivered = resolveResponse(body.sessionId, body.callId, "tool", result);
     return new Response(JSON.stringify({ delivered }), {
       status: delivered ? 200 : 409,
       headers: { "content-type": "application/json" },
@@ -76,10 +78,15 @@ export async function POST(req: Request) {
   }
 
   if (body.kind === "confirmation") {
-    const delivered = resolveResponse(body.sessionId, body.callId, {
-      approved: body.approved === true,
-      rememberChoice: body.rememberChoice,
-    });
+    const delivered = resolveResponse(
+      body.sessionId,
+      body.callId,
+      "confirmation",
+      {
+        approved: body.approved === true,
+        rememberChoice: body.rememberChoice,
+      },
+    );
     return new Response(JSON.stringify({ delivered }), {
       status: delivered ? 200 : 409,
       headers: { "content-type": "application/json" },
