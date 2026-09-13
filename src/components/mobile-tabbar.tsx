@@ -42,7 +42,7 @@ interface Tab {
 
 const TABS: Tab[] = [
   { href: "/", labelKey: "nav.chat", icon: MessageSquare },
-  { href: "/payments", labelKey: "nav.payments", icon: Receipt },
+  { href: "/actions", labelKey: "nav.payments", icon: Receipt },
   { href: "/wallet", labelKey: "nav.wallet", icon: Wallet },
   { href: "/settings", labelKey: "nav.settings", icon: Settings },
 ];

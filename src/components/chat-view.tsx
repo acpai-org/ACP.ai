@@ -29,6 +29,8 @@ import { dropDraft } from "@/lib/chat/draft-store";
 import { ShootingStars } from "@/components/ui/shooting-stars";
 import { StarsBackground } from "@/components/ui/stars-background";
 import { ModelPicker } from "@/components/model-picker";
+import { AttestcoinQuickCheck } from "@/components/attestcoin-quick-check";
+import { extractTrackedTxs } from "@/lib/chat/attest-tx";
 import { cn } from "@/lib/utils";
 
 function newMessage(
@@ -111,6 +113,21 @@ export function ChatView() {
 
   const activeSession = activeId ? sessions[activeId] ?? null : null;
   const messages = useMemo(() => activeSession?.messages ?? [], [activeSession]);
+
+  // AC11 (Task 8): the tracked source-chain tx of the chat's LAST completed
+  // assistant message — pre-fills the composer's Attestcoin quick-check
+  // popover (one click from "just sent" to "is it attested?"). Only the LAST
+  // assistant message counts (per spec): a plain-text reply after a transfer
+  // means the "just sent" moment has passed and a stale prefill would confuse.
+  const lastAssistantAttestTx = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "assistant" || m.streaming) continue;
+      const txs = extractTrackedTxs(m);
+      return txs.length > 0 ? { txHash: txs[0].txHash, chainId: txs[0].chainId } : null;
+    }
+    return null;
+  }, [messages]);
 
   const ensureSession = useCallback((): string => {
     if (activeId && sessions[activeId]) return activeId;
@@ -1200,6 +1217,9 @@ export function ChatView() {
               <div className="flex-1">
                 <ChatInput onSend={handleSend} disabled={isThinking || isSettling} prefill={editingPrefill} onStop={handleStop} isGenerating={isThinking} sessionKey={activeId} />
               </div>
+              {/* AC11 (Task 8): native Attestcoin quick-check (proof lookup /
+                  cost estimate / certificate verify) attached to the composer. */}
+              <AttestcoinQuickCheck prefill={lastAssistantAttestTx} />
               <AiProviderButton />
             </div>
           </div>

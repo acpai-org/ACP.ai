@@ -96,6 +96,155 @@ function userFacingFallback(result: ToolClientResult): string {
   return result.summary;
 }
 
+// ── AC5 — payment rows for agent-executed transfers (root cause #4) ─────────
+// execTransfer/execBatchTransfer used to be the ONLY money paths in the app
+// with no payment row: the legacy intent-card flow (use-settle-payment.ts)
+// recorded one, agent flows recorded nothing. So the Actions page's payments
+// table stayed empty for agent transfers, the Attestcoin poller (which watches
+// the payments table) had no candidates, nothing ever attested, and the wallet
+// panel's "Recent attestations" read None forever. Recording HERE — at the
+// source, in the browser half that owns the wallet — makes every settled
+// agent transfer a first-class payment: attestable, filterable, and
+// exportable as a certificate.
+interface AgentPaymentEntry {
+  recipientAddress: string;
+  token: string;
+  amountHuman: string;
+  memo: string | null;
+  txHash: string;
+  chainId: number;
+}
+
+/**
+ * Extract the transfers inside a tool result that are CONFIRMED on-chain and
+ * therefore deserve a settled payment row. Rules:
+ *  - transfer: the whole result must be ok with a txHash.
+ *  - batch_transfer: one entry per successful result (a batch interrupted by
+ *    a later rejection/timeout still settles its earlier transfers — those
+ *    must not vanish from the ledger).
+ *  - receipt_timeout/unknown_status: deliberately NOTHING is recorded. The tx
+ *    was broadcast but its fate is unknown — "settled" would lie if it
+ *    reverts, "failed" would lie if it lands, and the poller only knows how
+ *    to watch settled rows. The background tracker (trackUnknownTx) owns the
+ *    follow-up; a manual re-check can settle the record later.
+ *  - no txHash / no wallet-usable amount+recipient shapes: skip silently.
+ */
+function collectSettledTransferEntries(
+  tool: string,
+  args: Record<string, unknown>,
+  result: ToolClientResult,
+): AgentPaymentEntry[] {
+  if (result.error === "receipt_timeout" || result.error === "unknown_status") return [];
+  const chainId =
+    result.chainId != null ? result.chainId : typeof args.chain === "number" ? args.chain : null;
+  if (chainId == null) return [];
+
+  if (tool === "transfer") {
+    if (!result.ok || !result.txHash) return [];
+    const recipient = typeof args.recipient === "string" ? args.recipient : undefined;
+    const amount = typeof args.amount === "string" ? args.amount : undefined;
+    // Prefer the executor's RESOLVED symbol (e.g. "0xabc…123" → "TOKEN");
+    // fall back to the raw tool arg.
+    const token =
+      typeof result.data?.token === "string" && result.data.token
+        ? result.data.token
+        : typeof args.token === "string"
+          ? args.token
+          : undefined;
+    if (!recipient || !amount || !token) return [];
+    return [
+      {
+        recipientAddress: recipient,
+        token,
+        amountHuman: amount,
+        memo: typeof args.memo === "string" ? args.memo : null,
+        txHash: result.txHash,
+        chainId,
+      },
+    ];
+  }
+
+  if (tool === "batch_transfer") {
+    const specs = Array.isArray(args.transfers) ? (args.transfers as unknown[]) : null;
+    const entries = result.data?.results;
+    if (!specs || !Array.isArray(entries)) return [];
+    // execBatchTransfer pushes exactly one result per processed spec in
+    // order, so results[i] ↔ args.transfers[i] is a safe positional join.
+    const out: AgentPaymentEntry[] = [];
+    for (let i = 0; i < entries.length && i < specs.length; i++) {
+      const entry = entries[i] as { recipient?: unknown; ok?: unknown; txHash?: unknown };
+      if (entry.ok !== true || typeof entry.txHash !== "string" || !entry.txHash) continue;
+      const spec = specs[i] as Record<string, unknown>;
+      const recipient =
+        typeof entry.recipient === "string"
+          ? entry.recipient
+          : typeof spec.recipient === "string"
+            ? spec.recipient
+            : undefined;
+      const amount = typeof spec.amount === "string" ? spec.amount : undefined;
+      const token = typeof spec.token === "string" ? spec.token : undefined;
+      if (!recipient || !amount || !token) continue;
+      out.push({
+        recipientAddress: recipient,
+        token,
+        amountHuman: amount,
+        memo: typeof spec.memo === "string" ? spec.memo : null,
+        txHash: entry.txHash,
+        chainId,
+      });
+    }
+    return out;
+  }
+
+  return [];
+}
+
+/**
+ * Fire-and-forget POST /api/payments for every settled transfer in the tool
+ * result. Plain fetch on purpose (this file predates react-query usage here
+ * and the recording must never delay the model's tool-result delivery): the
+ * /api/agent/respond POST has already been sent by the caller before this
+ * runs, and each recording carries status:"settled" + txHash + settledAt —
+ * the AC5 extension to the payments create route — so the row is born
+ * settled in one request (no PATCH round-trip, no duplicate payment_settle
+ * action-log entry; the agent loop already logged the tool execution).
+ */
+function recordAgentTransferPayments(
+  senderAddress: string | null,
+  tool: string,
+  args: Record<string, unknown>,
+  result: ToolClientResult,
+): void {
+  for (const entry of collectSettledTransferEntries(tool, args, result)) {
+    void fetch("/api/payments", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        recipientAddress: entry.recipientAddress,
+        recipientLabel: null,
+        token: entry.token,
+        tokenAddress: null,
+        amountHuman: entry.amountHuman,
+        memo: entry.memo,
+        chainId: entry.chainId,
+        senderAddress,
+        status: "settled",
+        txHash: entry.txHash,
+        settledAt: Date.now(),
+      }),
+    })
+      .then((res) => {
+        // The transfer itself already happened — a rejected recording (4xx,
+        // e.g. an amount shape the validator refuses) must never surface in
+        // the chat, but should be diagnosable.
+        if (!res.ok) console.warn("[agent] AC5: payment row not recorded (HTTP " + res.status + ")");
+      })
+      .catch(() => {
+        // route down / offline — best-effort by design
+      });
+  }
+}
+
 export function useAgentRun() {
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -435,6 +584,14 @@ export function useAgentRun() {
           } catch {
             delivered = false;
           }
+
+          // AC5 (root cause #4): the tool result is delivered (or narrated in
+          // the !delivered fallback below) — NOW record the payment rows for
+          // any settled transfers. Placed after the respond POST so recording
+          // can never delay the model's tool-result delivery, and before the
+          // aborted early-return so an abort-after-execution still keeps its
+          // on-chain transfer in the ledger (the tx landed regardless).
+          recordAgentTransferPayments(address ?? null, tool, args, result);
 
           if (!delivered) {
             // F2 fix (zombie dispatch): if the run was aborted while the

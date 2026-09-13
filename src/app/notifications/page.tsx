@@ -633,7 +633,7 @@ export default function NotificationsPage() {
                         the "in flight" case is exactly when you want to go
                         watch it. */}
                     <Link
-                      href={`/payments?highlight=${encodeURIComponent(joined.id)}`}
+                      href={`/actions?highlight=${encodeURIComponent(joined.id)}`}
                       onClick={(e) => e.stopPropagation()}
                       className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary transition-all duration-200 hover:border-primary/45 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                       aria-label={t("notifications.viewPayment")}

@@ -224,11 +224,60 @@ function WatcherRow({ poller }: { poller: PollerRow | undefined }) {
   );
 }
 
-const RecentRow = memo(function RecentRow({ row }: { row: RecentAttestationRow }) {
+// ── AC8: the attestation feed now carries BOTH payments and agent actions ────
+// GET /api/attestcoin/recent returns payment rows (existing fields + type:
+// "payment") and action rows (type: "action" with tool/txHash/…). The shared
+// RecentAttestationRow type lives in lib/api.ts, which a concurrent task owns
+// — so the action-row extension is defined HERE and applied at the fetch
+// boundary via a widening assignment (RecentAttestationRow[] → FeedRow[] is
+// a sound upcast: every payment row is still a FeedRow, and the server now
+// also emits action rows the shared type can't express).
+
+/** Payment feed row — the server additionally tags it `type: "payment"`. */
+type PaymentFeedRow = RecentAttestationRow & { type?: "payment" };
+
+/** Agent-action feed row (attested transfer/deploy/escrow/swap). */
+interface ActionFeedRow {
+  id: string;
+  type: "action";
+  tool: string;
+  txHash: string | null;
+  chainId: number | null;
+  chainName: string;
+  attestedAt: number;
+  attestRoot: string | null;
+  onchainVerified: boolean;
+  cc3TxHash: string | null;
+}
+
+type FeedRow = PaymentFeedRow | ActionFeedRow;
+
+/** AC8: humanized titles for attested agent-action rows (raw tool id fallback). */
+const ACTION_FEED_LABELS: Record<string, string> = {
+  transfer: "Agent transfer",
+  batch_transfer: "Batch transfer",
+  deploy_contract: "Contract deployment",
+  create_conditional_release: "Escrow lock",
+  execute_conditional_release: "Conditional release",
+  cross_chain_swap: "Cross-chain swap",
+  payment_settle: "Payment settlement",
+};
+
+function actionFeedLabel(tool: string): string {
+  return ACTION_FEED_LABELS[tool] ?? tool;
+}
+
+const RecentRow = memo(function RecentRow({ row }: { row: FeedRow }) {
   const { timeAgo } = useFormatters();
+  // AC8: payment rows deep-link with the highlight param the actions page
+  // already honors; action rows link to the page plain — the page's highlight
+  // handling matches payment ids only today (noted in the worklog: the
+  // Actions view could adopt data-action-row highlighting the same way).
+  const href = row.type === "action" ? "/actions" : `/actions?highlight=${row.id}`;
+  const isAction = row.type === "action";
   return (
     <Link
-      href="/payments"
+      href={href}
       className="group flex items-center gap-2.5 rounded-xl px-2.5 py-2 transition-colors hover:bg-surface-2/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
       title={row.attestRoot ?? undefined}
     >
@@ -241,12 +290,27 @@ const RecentRow = memo(function RecentRow({ row }: { row: RecentAttestationRow }
         ) : null}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-medium text-foreground">
-          {row.recipientLabel ?? shortenAddress(row.recipientAddress)}
-        </p>
-        <p className="truncate text-[10px] text-muted-2">
-          {row.amountHuman} {row.token} · {row.chainName} · {timeAgo(row.attestedAt)}
-        </p>
+        {isAction ? (
+          // Action rows: humanized tool name; chain + time (no amount/token —
+          // an attested action proves a transaction, not a payment amount).
+          <>
+            <p className="truncate text-xs font-medium text-foreground">
+              {actionFeedLabel(row.tool)}
+            </p>
+            <p className="truncate text-[10px] text-muted-2">
+              {row.chainName} · {timeAgo(row.attestedAt)}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="truncate text-xs font-medium text-foreground">
+              {row.recipientLabel ?? shortenAddress(row.recipientAddress)}
+            </p>
+            <p className="truncate text-[10px] text-muted-2">
+              {row.amountHuman} {row.token} · {row.chainName} · {timeAgo(row.attestedAt)}
+            </p>
+          </>
+        )}
       </div>
       <ArrowRight
         className="h-3 w-3 shrink-0 text-muted-3 opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-100"
@@ -257,16 +321,18 @@ const RecentRow = memo(function RecentRow({ row }: { row: RecentAttestationRow }
 });
 
 /**
- * Payment-side attestation feed — the most recent payments the server-side
- * poller flipped to attested (GET /api/attestcoin/recent, local DB only).
- * Each row deep-links to the payments page; the on-chain-verified rows carry
- * a BadgeCheck corner mark.
+ * Attestation feed — the most recent rows the server-side poller flipped to
+ * attested (GET /api/attestcoin/recent, local DB only): settled payments AND
+ * agent actions (AC8). Each row deep-links to the actions page (Task 5's
+ * /payments → /actions rename); the on-chain-verified rows carry a BadgeCheck
+ * corner mark.
  */
 function RecentAttestations() {
   const { t } = useI18n();
   const { data: recent, isLoading } = useRecentAttestations();
 
-  const rows = recent ?? [];
+  // AC8 fetch boundary: see the FeedRow comment above.
+  const rows: FeedRow[] = recent ?? [];
   return (
     <div className="rounded-xl border border-border bg-surface-2/40 p-2.5">
       <div className="flex items-center justify-between px-0.5 pb-1.5">
@@ -294,7 +360,7 @@ function RecentAttestations() {
           ))}
           {rows.length > 0 ? (
             <Link
-              href="/payments"
+              href="/actions"
               className="flex items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[10px] font-medium text-muted-2 transition-colors hover:bg-surface-2/60 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
             >
               {t("wallet.recentViewAll")}

@@ -183,6 +183,8 @@ export function ensureDb(): void {
       source_tx_hash TEXT,
       cc3_tx_hash TEXT,
       attest_root TEXT,
+      attested_at INTEGER,
+      onchain_verified_at INTEGER,
       created_at INTEGER NOT NULL,
       completed_at INTEGER
     );
@@ -244,6 +246,24 @@ export function ensureDb(): void {
     }
     if (!paymentColNames.has("cc3_tx_hash")) {
       sqlite.exec("ALTER TABLE payments ADD COLUMN cc3_tx_hash TEXT");
+    }
+  } catch {
+    // non-critical — reads/writes of the new columns will fail loudly in dev
+  }
+
+  // AC8 (action attestation tracking): attestation timestamp columns for
+  // agent_actions — mirrors the payments attestation-column migration above
+  // so existing databases gain them, while the CREATE TABLE above already
+  // includes them for fresh databases. The poller flips attested_at when a
+  // proof first becomes available for the action's source-chain tx.
+  try {
+    const actionCols = sqlite.prepare("PRAGMA table_info(agent_actions)").all() as { name: string }[];
+    const actionColNames = new Set(actionCols.map((c) => c.name));
+    if (!actionColNames.has("attested_at")) {
+      sqlite.exec("ALTER TABLE agent_actions ADD COLUMN attested_at INTEGER");
+    }
+    if (!actionColNames.has("onchain_verified_at")) {
+      sqlite.exec("ALTER TABLE agent_actions ADD COLUMN onchain_verified_at INTEGER");
     }
   } catch {
     // non-critical — reads/writes of the new columns will fail loudly in dev

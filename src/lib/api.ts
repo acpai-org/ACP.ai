@@ -27,6 +27,16 @@ export interface CreatePaymentPayload {
   memo?: string | null;
   chainId: number;
   senderAddress: string | null;
+  /**
+   * AC5 — optional settlement-on-create fields (accepted by POST /api/payments
+   * since the agent-transfer recording landed): a transfer the caller already
+   * holds a receipt for can be born settled in ONE request instead of
+   * create-then-PATCH. "settled" additionally requires txHash (D15 invariant,
+   * enforced server-side); settledAt defaults to Date.now() when omitted.
+   */
+  status?: "pending" | "signing" | "settling" | "settled" | "failed";
+  txHash?: string;
+  settledAt?: number;
 }
 
 export interface UpdatePaymentPayload {

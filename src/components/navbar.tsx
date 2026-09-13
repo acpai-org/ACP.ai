@@ -123,30 +123,28 @@ export function Navbar() {
       {/* ── Main capsule: brand + nav + language + theme.
            Android (<sm): brand + CHATS control only (N7).
            Tablet (sm–lg): brand + lang/theme + nav hamburger.
-           Desktop (xl+): CENTERED (N5) — clamped so it never runs under the
-             top-right cluster; true viewport-center from 1920px (plain CSS —
-             see navbar-true-center) where the budget allows. Self-shrink
-             ladder: xl shows ICON-ONLY links (narrow zone shared with the
-             cluster), 2xl+ adds labels back (room to breathe). */}
+           Desktop (xl+): TRUE viewport center (N5/AC3) — dead middle at every
+             desktop width, not just ≥1920px. Capped at calc(100vw − 42rem)
+             (plain CSS — see navbar-true-center) so it can never run under
+             the top-right cluster. Self-shrink ladder: xl shows ICON-ONLY
+             links (narrow zone shared with the cluster), 2xl+ adds labels
+             back (room to breathe). */}
       <div
         className={cn(
           "fixed top-3 z-50 sm:top-4",
           "left-4 sm:left-6",
-          // xl: the container spans [left-margin, cluster-zone]; the capsule
-          // centers itself inside it (mx-auto on the w-fit nav) — overlap-proof
-          // by construction.
-          // ≥1920px (navbar-true-center, plain unlayered CSS in globals.css —
-          // custom-breakpoint variants lose the cascade to smaller standard
-          // breakpoints in the emitted sheet): TRUE viewport centering; the
-          // U1 logo is ~98px wider than the old square mark, so the old 2xl
-          // breakpoint no longer cleared the cluster (measured 34px of
-          // overlap at 1600px before this fix).
-          "xl:right-[26rem]",
+          // AC3 (owner bug report — navbar off-center on desktop): the old
+          // xl:right-[26rem] centered the capsule inside [left-margin,
+          // cluster-zone] which reads visibly LEFT of true center at every
+          // width below 1920px. navbar-true-center (unlayered CSS in
+          // globals.css) now pins it to the exact viewport middle from 1280px
+          // up, with the max-width overlap guard — no layered right-bound is
+          // needed or wanted anymore.
           "navbar-true-center",
         )}
       >
         <nav
-          className="neumorphic flex w-fit items-center gap-1.5 px-3 py-2.5 sm:gap-2 sm:px-4 xl:mx-auto 2xl:gap-3"
+          className="neumorphic flex w-fit items-center gap-1.5 px-3 py-2.5 sm:gap-2 sm:px-4 2xl:gap-3"
           style={{ borderRadius: 44 }}
           aria-label={t("nav.mainNav")}
         >
@@ -243,14 +241,29 @@ export function Navbar() {
 
       {/* ── Right capsule: chain + wallet (top-right corner, outside navbar).
            Hidden on Android (N7) — connect/chain live in the bottom-bar
-           drawer and on the Wallet page there. */}
+           drawer and on the Wallet page there.
+           AC3: the chain switcher is COMPACT (icon + testnet chip, no chain
+           name) from 1280–1791px and full-name from 1792px up. The navbar
+           capsule is TRUE-centered on that whole range; a truly centered
+           capsule only avoids running under this cluster when
+           capsuleWidth ≤ viewport − 2×clusterWidth — with the full-name
+           switcher (~434px cluster) the labeled capsule (~790px) doesn't fit
+           until ~1660px, so the name yields in the tight band (it stays one
+           click away — the dropdown lists every chain, fully labeled, with
+           the active check). */}
       <div className="fixed right-4 top-3 z-50 hidden sm:right-6 sm:top-4 sm:flex">
         {/* py-3.5 balances the taller logo capsule (68px vs 60px) so the two
             top corners read as one system. */}
         <div className="neumorphic flex items-center gap-2 px-2.5 py-3.5" style={{ borderRadius: 44 }}>
-          <div className="hidden sm:block">
+          <div className="hidden sm:block navbar-chain-compact">
             {/* plain (flat) inside the neumorphic capsule — C13: no stacked
-                shadows; non-compact renders the active chain NAME (C14). */}
+                shadows; compact renders icon + testnet chip only. */}
+            <ChainSwitcher plain compact />
+          </div>
+          <div className="hidden sm:block navbar-chain-full">
+            {/* non-compact renders the active chain NAME (C14) — shown where
+                the true-centered budget has room for it (≥1792px, plain CSS
+                class pair below). */}
             <ChainSwitcher plain />
           </div>
           <WalletButton />

@@ -12,6 +12,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  FileDown,
   FileSpreadsheet,
   Loader2,
   ShieldAlert,
@@ -156,6 +157,11 @@ type AttestCheck =
       checkedAt: number;
     };
 
+// AC6 — per-row certificate export state (pending spinner / inline error).
+type CertExport =
+  | { phase: "pending" }
+  | { phase: "error"; message: string };
+
 const ATTEST_CHECK_TIMEOUT_MS = 12_000;
 
 const STATUS_FILTERS: { value: StatusFilter; key: string }[] = [
@@ -195,6 +201,8 @@ export function ActionsView({ compact = false }: { compact?: boolean }) {
   const [exportedCsv, setExportedCsv] = useState(false);
   // R24: per-row check-attestation results, keyed by action row id.
   const [attestChecks, setAttestChecks] = useState<Record<string, AttestCheck>>({});
+  // AC6: per-row certificate-export results, keyed by action row id.
+  const [certExports, setCertExports] = useState<Record<string, CertExport>>({});
   // R23: range filter with its time anchor captured in the SELECT handler (a
   // user event — the only place Date.now() is allowed) rather than per render:
   // the cutoff stays stable for the session, rows don't flicker in/out of the
@@ -253,6 +261,45 @@ export function ActionsView({ compact = false }: { compact?: boolean }) {
       fail("error");
     }
   }, []);
+
+  // AC6 — certificate export for an attested action: GET
+  // /api/attestcoin/certificate?type=action&id=… downloads the portable
+  // proof record (schema acp.attestation-certificate/v1 — verifiable by the
+  // app's own certificate verifier and by any third party). Fetch+blob rather
+  // than window.open so a 409 "not attested yet" surfaces as an inline error
+  // row instead of a raw JSON tab.
+  const exportActionCertificate = useCallback(async (rowId: string) => {
+    setCertExports((p) => ({ ...p, [rowId]: { phase: "pending" } }));
+    try {
+      const res = await fetch(`/api/attestcoin/certificate?type=action&id=${encodeURIComponent(rowId)}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setCertExports((p) => ({ ...p, [rowId]: { phase: "error", message: body.error ?? `HTTP ${res.status}` } }));
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const filename = match?.[1] ?? `acp-certificate-action-${rowId}.json`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setCertExports((p) => {
+        const next = { ...p };
+        delete next[rowId];
+        return next;
+      });
+    } catch {
+      setCertExports((p) => ({ ...p, [rowId]: { phase: "error", message: t("payments.attestError") } }));
+    }
+  }, [t]);
 
   // Live lifecycle overlay (C3): executor-driven transitions re-render rows
   // instantly and nudge the API query to refetch the persisted state.
@@ -706,6 +753,8 @@ export function ActionsView({ compact = false }: { compact?: boolean }) {
             const isLive = LIVE_SPIN.has(rowStatus);
             const isExpanded = expandedId === a.id;
             const hasDetail = Boolean(a.params || a.cc3TxHash || a.attestRoot || a.sourceTxHash || a.runId);
+            // AC6: this row's certificate-export state (spinner / inline error).
+            const certExport = certExports[a.id];
             return (
               <motion.div
                 key={a.id}
@@ -941,6 +990,37 @@ export function ActionsView({ compact = false }: { compact?: boolean }) {
                             <pre className="acp-scroll max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-md p-1.5 code-surface font-mono text-[9px] leading-relaxed text-foreground/60">
                               {JSON.stringify(a.params, null, 1)}
                             </pre>
+                          </div>
+                        ) : null}
+                        {/* AC6 — certificate export: offered once the action has
+                         * an attestation on record (attestRoot persisted by the
+                         * poller, or a CC3 submission tx). Downloads the same
+                         * acp.attestation-certificate/v1 JSON the payments page
+                         * exports — hand it to the certificate verifier (or any
+                         * third party) to re-check the proof live. */}
+                        {a.attestRoot || a.cc3TxHash ? (
+                          <div className="pt-0.5">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void exportActionCertificate(a.id);
+                              }}
+                              className="hit-slop flex w-full min-h-8 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-primary/25 bg-primary/10 px-3 py-1.5 text-[10px] font-medium text-primary transition-colors hover:border-primary/45 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+                              title={t("actions.exportCertificateTip")}
+                            >
+                              {certExport?.phase === "pending" ? (
+                                <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                              ) : (
+                                <FileDown className="h-3 w-3" aria-hidden />
+                              )}
+                              {t("actions.exportCertificate")}
+                            </button>
+                            {certExport?.phase === "error" ? (
+                              <p className="mt-1 text-[9px] leading-relaxed text-warning" role="alert">
+                                {certExport.message}
+                              </p>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>

@@ -28,7 +28,12 @@ export interface PollerRow {
   lastFlipAt: number | null;
   flippedTotal: number;
   lastError: string | null;
+  /** AC8: unattested payments + eligible agent actions the poller can act on. */
   watching: number | null;
+  /** AC8 (additive): the agent-action share of `watching`; absent on older
+   * server responses. Exposed for future consumers (e.g. the chat UI) — the
+   * wallet panel renders the combined `watching` count only. */
+  watchingActions?: number | null;
 }
 
 export interface SubmissionRow {

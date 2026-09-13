@@ -243,8 +243,10 @@ export const IntentCard = memo(function IntentCard({
       ? usdcInfo?.address ?? (/^0x[a-fA-F0-9]{40}$/.test(intent.token) ? (intent.token as `0x${string}`) : null)
       : (intent.token as `0x${string}`);
 
-  const explorerUrl = txHash ? explorerTxUrl(effectiveChain, txHash) : "/payments";
-  const receiptHref = isDone && txHash ? explorerUrl : "/payments";
+  // AC7: fallback hrefs pointed at /payments — the tab now lives at /actions
+  // (old /payments URLs 308-forward, but in-app links should be canonical).
+  const explorerUrl = txHash ? explorerTxUrl(effectiveChain, txHash) : "/actions";
+  const receiptHref = isDone && txHash ? explorerUrl : "/actions";
 
   const steps = STEPS;
   const currentIdx = paymentStep ? resolveStepIndex(paymentStep, steps) : 0;

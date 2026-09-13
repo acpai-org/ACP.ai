@@ -16,6 +16,7 @@ import { ensureSourceChainMapFresh, sourceChainByEvmId } from "@/lib/attestcoin/
 import { decodeTxBytes } from "@/lib/attestcoin/decode";
 import { proofProvider } from "@gluwa/usc-sdk";
 import { cadenceIntervalMs, cadenceLabelEn, formatIntervalHuman } from "@/lib/recurring/cadence";
+import { reviewContractSource } from "@/lib/contracts/review";
 import {
   AUTOMATION_RULE_CAP,
   validateAction,
@@ -759,6 +760,37 @@ export async function execSubmitProofOnchain(
     summary,
     data: { ...result, explorerTx: cc3TxUrl, dashboardUrl: attestcoinEndpoints().dashboardUrl, signerAddress: availability.signerAddress },
   };
+}
+
+// ── AC4: contract self-review (review_contract — read-only, server-side) ────
+
+export async function execReviewContract(
+  args: { source: string; sourceName?: string | null },
+): Promise<{ ok: boolean; summary: string; data?: Record<string, unknown>; error?: string }> {
+  try {
+    const review = await reviewContractSource(args.source, args.sourceName ?? undefined);
+    // The raw source is NEVER echoed back: the model already holds it (it just
+    // sent it as the tool args) — echoing doubles token cost and would leak
+    // draft sources into the action log.
+    const data: Record<string, unknown> = {
+      ready: review.ready,
+      findings: review.findings,
+      compileErrors: review.compileErrors,
+      compileWarnings: review.compileWarnings,
+      reviewedAt: review.reviewedAt,
+    };
+    if (review.artifact) data.artifact = review.artifact;
+    // ok:true whenever the review RAN — a draft full of findings is a
+    // SUCCESSFUL review (that's the product); ok:false is reserved for the
+    // engine itself failing (solc worker crash, internal bug).
+    return { ok: true, summary: review.summary, data };
+  } catch (err) {
+    return {
+      ok: false,
+      summary: `Contract review failed internally: ${err instanceof Error ? err.message : String(err)}`,
+      error: "review_failed",
+    };
+  }
 }
 
 // ── N24: app-control executors (contacts + recurring schedule management) ────

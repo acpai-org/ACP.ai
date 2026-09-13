@@ -11,6 +11,7 @@ import { IntentCard } from "@/components/intent-card";
 import { StatusPill } from "@/components/status-pill";
 import { AgentTrace } from "@/components/agent-trace";
 import { AgentConfirmation } from "@/components/agent-confirmation";
+import { AttestcoinTxActions } from "@/components/attestcoin-tx-actions";
 import { RichText, UserText } from "@/components/rich-text";
 import { useI18n } from "@/lib/i18n";
 import { useFormatters } from "@/lib/use-formatters";
@@ -35,11 +36,19 @@ interface ChatMessageProps {
 
 const spring = { type: "spring" as const, stiffness: 380, damping: 30 };
 
-/** N22: no-change window after which a still-`streaming` message shows an
- * honest stalled indicator instead of an eternally blinking cursor. The
+/** N22/AC1: no-change window after which a still-`streaming` message shows
+ * an honest stalled indicator instead of an eternally blinking cursor. The
  * timer resets on EVERY content/reasoning/trace/confirmation change — real
- * progress keeps the hint hidden. */
-const STALL_HINT_MS = 15_000;
+ * progress keeps the hint hidden.
+ *
+ * AC1 (owner bug report): the hint fired after just 15 seconds, which made
+ * ordinary LLM latencies (queueing, long reasoning, slow providers — replies
+ * routinely take 30-120s) look like a broken stream and trained users to
+ * distrust the warning. A reply is only honestly "stalled" when NOTHING has
+ * changed for a FULL 5 minutes — the owner's explicit threshold. Wallet
+ * signature waits, receipt polling and attestation waits remain excluded via
+ * IN_FLIGHT_STATUSES below (those are working states, not stalls). */
+const STALL_HINT_MS = 300_000;
 
 /** Trace statuses that mean an operation is ACTIVELY in flight (P3): a wallet
  * signature wait, a broadcast awaiting its receipt, an attestation wait, a
@@ -475,6 +484,12 @@ export const ChatMessage = memo(function ChatMessage({
             ) : null}
 
             {message.status ? <StatusPill status={message.status} /> : null}
+
+            {/* AC11 (Task 8): per-message Attestcoin action row — rendered only
+                for non-streaming assistant messages whose trace carries a
+                tracked source-chain tx (the component itself returns null
+                otherwise). Sits under the trace/bubble, above the stall hint. */}
+            <AttestcoinTxActions message={message} />
 
             {streaming ? <StalledHint live={streaming} signature={progressSignature} inFlight={inFlight} /> : null}
           </div>

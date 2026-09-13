@@ -915,23 +915,48 @@ select:focus:not(:focus-visible) {
   color: inherit;
 }
 
-/* ── U1: navbar true viewport-centering at very wide screens ──────────────────
+/* ── U1/AC3: navbar TRUE viewport-centering at ALL desktop widths ─────────────
    Plain UNLAYERED CSS on purpose. The capsule needs left:50% + right:auto +
-   a -50% self-translate at ≥1920px, but those properties compete with the
-   layered utilities (left-4/sm:left-6, xl:right-[26rem], xl:mx-auto) — and
-   Tailwind/Turbopack emits the custom-breakpoint media block BEFORE the sm
+   a -50% self-translate at ≥1280px (xl — every desktop width, per the owner's
+   "always dead middle" requirement; the old behavior only true-centered
+   ≥1920px, leaving 1280–1919px noticeably left-of-center), but those
+   properties compete with the layered utilities (left-4/sm:left-6) — and
+   Tailwind/Turbopack emits custom-breakpoint media blocks BEFORE the sm
    block (live-observed in dev: 3xl:left-1/2 and min-[1920px]:left-1/2 both
    LOSE the cascade to sm:left-6 — the selector `.\33 xl\:left-1\/2` sits
    above `@media (min-width: 40rem)` in the served stylesheet). Unlayered
    rules beat every @layer rule regardless of source order, so this wins
-   without !important and without fighting the variant sort. */
-@media (min-width: 1920px) {
+   without !important and without fighting the variant sort.
+
+   Overlap guard: a truly centered capsule overlaps the fixed top-right
+   cluster (chain + wallet) only when capsuleWidth > viewport − 2×cluster.
+   The CONTENT ladder keeps the natural widths inside that budget:
+     1280–1791px → icon-only nav links + COMPACT chain switcher (~120px
+                 cluster side; the chain NAME hides — it stays one click
+                 away in the fully-labeled dropdown)
+     ≥1792px     → labeled nav links + full-name chain switcher
+   The container's max-width below is only a BACKSTOP for pathological
+   content (unusually long locale labels): it clamps the capsule and the
+   flex row compresses inside instead of running under the cluster. */
+@media (min-width: 1280px) {
   .navbar-true-center {
     left: 50%;
     right: auto;
     translate: -50% 0;
+    max-width: calc(100vw - 40rem);
   }
   .navbar-true-center > nav {
     margin-inline: 0;
+    max-width: 100%;
   }
+}
+
+/* AC3 — right-cluster chain switcher visibility ladder (unlayered for the
+   same cascade reasons as above; `hidden sm:block` on both wrappers handles
+   the tablet band, these plain rules pick compact vs full per desktop band).
+   Default (mobile/tablet <1280): full name — matches the pre-AC3 behavior. */
+.navbar-chain-compact { display: none; }
+@media (min-width: 1280px) and (max-width: 1791px) {
+  .navbar-chain-compact { display: block; }
+  .navbar-chain-full { display: none; }
 }

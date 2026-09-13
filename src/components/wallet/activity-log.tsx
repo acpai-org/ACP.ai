@@ -504,7 +504,7 @@ export function ActivityLog({ address, chainId }: { address: string; chainId: nu
                                   </button>
                                 ) : null}
                                 <Link
-                                  href={`/payments?contact=${encodeURIComponent(e.onchain!.to)}`}
+                                  href={`/actions?contact=${encodeURIComponent(e.onchain!.to)}`}
                                   aria-label={t("payments.contactFilterLabel", {
                                     name:
                                       contactLabelByAddress.get(payeeKey(e.onchain!.to)) ??

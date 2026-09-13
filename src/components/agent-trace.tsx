@@ -173,6 +173,9 @@ const TOOL_LABEL_KEYS: Record<string, string> = {
   estimate_verification_cost: "trace.toolCostEstimate",
   get_attestation_bounds: "trace.toolBounds",
   submit_proof_onchain: "trace.toolSubmitProof",
+  // AC4: the review half of the custom-deploy loop — labeled like every peer
+  // so the trace row shows what the model is iterating on (not a raw tool id).
+  review_contract: "trace.toolReviewContract",
 };
 
 function shortHash(h: string | undefined): string {
@@ -465,16 +468,50 @@ export function AgentTrace({ steps, footer }: { steps: TraceStep[]; footer?: Age
                       </div>
                     ) : null}
                     {(() => {
-                      // N27.1/N25: tool results that carry deep links (CC3
+                      // N27.1/N25/AC2: tool results that carry deep links (CC3
                       // explorer tx URLs, source-chain explorer URLs) render
                       // as clickable records — every Attestcoin artifact
                       // viewable straight from the chat trace.
+                      //
+                      // AC2 (owner bug report — duplicate "Explorer" links):
+                      // this block used to push explorerTx AND explorerUrl as
+                      // TWO separate buttons, and BOTH duplicated the Explorer
+                      // button TxRow already renders for the step's txHash — a
+                      // single transfer step could show up to three identical
+                      // "Explorer" links. Now: one link per UNIQUE URL, and any
+                      // URL identical to TxRow's (same tx, same explorer) is
+                      // skipped — TxRow owns that one.
                       const data = step.result?.data as Record<string, unknown> | undefined;
                       const links: Array<{ label: string; url: string }> = [];
-                      const explorerTx = typeof data?.explorerTx === "string" ? (data.explorerTx as string) : null;
+                      const seenUrls = new Set<string>();
+                      const pushLink = (raw: unknown) => {
+                        if (typeof raw !== "string" || !/^https:\/\//.test(raw)) return;
+                        if (seenUrls.has(raw)) return;
+                        seenUrls.add(raw);
+                        links.push({ label: t("trace.explorer"), url: raw });
+                      };
+                      // TxRow's URL (when it renders) is the canonical one for
+                      // the step's tx — compute it exactly like TxRow does.
+                      const txHash = step.detail?.txHash ?? step.result?.txHash;
+                      const txChainId = step.detail?.chainId ?? step.result?.chainId;
+                      const txRowChain = txChainId ? getChainByChainId(txChainId) : undefined;
+                      const txRowUrl = txHash && txRowChain?.explorerUrl
+                        ? `${txRowChain.explorerUrl}/tx/${txHash}`
+                        : null;
+                      if (txRowUrl) seenUrls.add(txRowUrl);
+                      const explorerTxUrl = typeof data?.explorerTx === "string" ? (data.explorerTx as string) : null;
                       const explorerUrl = typeof data?.explorerUrl === "string" ? (data.explorerUrl as string) : null;
-                      if (explorerTx && /^https:\/\//.test(explorerTx)) links.push({ label: t("trace.explorer"), url: explorerTx });
-                      if (explorerUrl && /^https:\/\//.test(explorerUrl)) links.push({ label: t("trace.explorer"), url: explorerUrl });
+                      const dashboardUrl = typeof data?.dashboardUrl === "string" ? (data.dashboardUrl as string) : null;
+                      pushLink(explorerTxUrl);
+                      pushLink(explorerUrl);
+                      if (dashboardUrl) {
+                        // Distinct destination (ASC dashboard) — never collapsed
+                        // into the Explorer duplicates.
+                        if (!seenUrls.has(dashboardUrl)) {
+                          seenUrls.add(dashboardUrl);
+                          links.push({ label: t("trace.dashboard"), url: dashboardUrl });
+                        }
+                      }
                       if (links.length === 0) return null;
                       return (
                         <div className="mt-1 flex flex-wrap gap-1.5">

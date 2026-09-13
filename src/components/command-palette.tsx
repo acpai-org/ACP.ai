@@ -342,7 +342,7 @@ export function CommandPalette() {
     // Labels reuse the nav.* names via a single parameterized i18n key.
     const NAV_TARGETS: Array<{ href: string; labelKey: TranslationKey; icon: LucideIcon; keywords: string }> = [
       { href: "/wallet", labelKey: "nav.wallet", icon: Wallet, keywords: "wallet balance tokens swap receive" },
-      { href: "/payments", labelKey: "nav.payments", icon: Receipt, keywords: "action log audit trail payments history attestcoin" },
+      { href: "/actions", labelKey: "nav.payments", icon: Receipt, keywords: "action log audit trail payments history attestcoin" },
       { href: "/contacts", labelKey: "nav.contacts", icon: Users, keywords: "contacts address book recipients mention" },
       { href: "/recurring", labelKey: "nav.recurring", icon: CalendarClock, keywords: "recurring schedules subscriptions cadence fire" },
       { href: "/notifications", labelKey: "nav.notifications", icon: Bell, keywords: "notifications alerts inbox unread" },

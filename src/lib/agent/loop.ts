@@ -870,6 +870,10 @@ async function runServerTool(
       return st.execGetAttestationBoundsTool(args as never);
     case "submit_proof_onchain":
       return st.execSubmitProofOnchain(args as never);
+    // AC4: agentic contract review — read-only lint + solc feedback loop the
+    // model runs BEFORE deploy_contract (custom mode).
+    case "review_contract":
+      return st.execReviewContract(args as never);
     default:
       return { ok: false, summary: `Tool ${name} has no server executor.`, error: "no_executor" };
   }

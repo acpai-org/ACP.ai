@@ -34,7 +34,10 @@ export const NAV_SECTIONS: NavSection[] = [
       },
       {
         label: "Actions",
-        href: "/payments",
+        // AC7: route renamed /payments → /actions; a 308 stub keeps old links
+        // alive. The i18n key stays nav.payments (its VALUE already says
+        // "Actions") — no translation churn for a URL change.
+        href: "/actions",
         icon: Receipt,
         description: "Agent action log & full audit trail",
       },

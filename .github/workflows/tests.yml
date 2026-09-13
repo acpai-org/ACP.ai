@@ -1,0 +1,108 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AC9 — GitHub Actions workflow: "Tests"
+#
+# Runs the repo's own test suite (`npm test` →
+# `node --import tsx --test src/tests/*.test.mts`) plus `npm run typecheck`
+# (tsc --noEmit) so contributors and PRs get the same signal the maintainers
+# get locally. The glob picks up every `src/tests/*.test.mts` file, so new
+# test files are included automatically with zero workflow changes.
+#
+# Why Node 24: package.json engines requires node >=24, and the DB layer is
+# drizzle-orm over `node:sqlite` (DatabaseSync), which only ships in Node 24+.
+# Anything older fails at import time, not gradually.
+#
+# ── Test classification (researched from every file in src/tests/) ──────────
+# Hermetic (no external network — safe to rely on in CI):
+#   agent-loop.test.mts        — real loop + mock OpenAI SSE server on
+#                                127.0.0.1 (apiKey "test-key"); temp sqlite via
+#                                ACP_DB_PATH → mkdtemp before first import.
+#   recurring-fire.test.mts    — temp sqlite DB, pure fire/cadence logic.
+#   skills-seed.test.mts       — temp sqlite DB (+ seed-test-helpers.mjs opens
+#                                a second raw connection to the same temp DB).
+#   skills-allowlist.test.mts  — pure allowlist/union logic, no DB, no net.
+#   tool-coverage.test.mts     — registry/zod/i18n checks; reads repo source
+#                                files via process.cwd() (runs from repo root).
+#   contacts-rollup.test.mts   — pure grouping/canonicalization logic.
+#   fund-safety.test.mts       — temp sqlite DB + local solc compilation
+#                                (prepareDeployment gates), viem encoding only.
+#   attestcoin-gaps.test.mts   — pure logic (batch/chains/decode/proof cost
+#                                helpers); the "https://" hit is a string
+#                                assertion, not a request.
+#   contracts-compile.test.mts — solc-js compiles in a worker thread, viaIR +
+#                                optimizer: CPU-heavy but fully hermetic
+#                                (per-test timeouts of 60–120s already set).
+#
+# LIVE network (third-party hosts — read-only, no keys, no gas):
+#   attestcoin-pipeline.test.mts — hits Sepolia RPC
+#                                (ethereum-sepolia-rpc.publicnode.com), the
+#                                hosted Attestcoin Proof Builder, and the
+#                                Creditcoin CC3 Testnet RPC (Block Prover
+#                                precompile read). The file is engineered for
+#                                hostile networks: connectivity failures call
+#                                t.skip() (suite stays green when an endpoint
+#                                is unreachable/slow), while SEMANTIC failures
+#                                (malformed proof, precompile rejection) still
+#                                fail — that is the intended regression signal.
+#                                On GitHub-hosted runners (which have internet)
+#                                these run for real; occasional third-party
+#                                outages degrade to skips, not red builds.
+#                                Do not "fix" this by pinning or mocking — the
+#                                authors chose live-path coverage deliberately.
+#
+# No secrets are required: the app is BYOK. CREDITCOIN_SIGNER_KEY is only
+# needed for SIGNED on-chain submission (submit.ts), which no test exercises —
+# the pipeline test verifies read-only. ATTESTCOIN_NETWORK defaults to testnet,
+# which is exactly what the tests assert, so it is deliberately NOT set here.
+# No env vars are injected: every DB-touching test file isolates itself into a
+# mkdtemp() dir via ACP_DB_PATH before its first app-module import, so a global
+# value would only risk fighting that isolation.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# New pushes to the same branch/PR supersede the run in flight.
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+# Read-only token — this workflow checks out code and runs tests, nothing else.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Generous ceiling: solc viaIR compiles (~minutes each across several
+    # contracts) + the live-pipeline tests (60–120s per-test timeouts) + npm ci.
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24 # engines: >=24; node:sqlite requires 24
+          cache: npm # keyed on package-lock.json (present at repo root)
+
+      - name: Install dependencies
+        # npm ci — clean install from package-lock.json.
+        # NOTE: package.json's "trustedDependencies" is a Bun concept (Bun
+        # blocks postinstall scripts unless listed there). npm runs package
+        # lifecycle scripts normally, so plain `npm ci` is correct here.
+        run: npm ci
+
+      - name: Typecheck
+        # Kept as its own step so type errors are legible in the Actions log
+        # instead of being buried under test output.
+        run: npm run typecheck
+
+      - name: Tests
+        # Full suite, hermetic files + the live attestcoin-pipeline tests
+        # (see the classification notes at the top of this file).
+        run: npm test

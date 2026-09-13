@@ -125,6 +125,15 @@ export const agentActions = sqliteTable("agent_actions", {
   cc3TxHash: text("cc3_tx_hash"),
   /** Merkle root of the attestation backing this action, when applicable. */
   attestRoot: text("attest_root"),
+  // AC8: attestation tracking for agent ACTIONS (not just payments) — the
+  // poller now watches this table too. Before this, agent_actions carried
+  // attestRoot/cc3TxHash columns that nothing ever wrote for source-chain
+  // actions, so deploys/transfers/escrow locks never showed attestation
+  // state anywhere (worklog root cause #5).
+  /** Epoch ms when the Attestcoin poller first saw a proof for this action's source tx (server-side flip). */
+  attestedAt: integer("attested_at"),
+  /** Epoch ms when the Block Prover Precompile (0x0FD2) first confirmed the proof on-chain. */
+  onchainVerifiedAt: integer("onchain_verified_at"),
   createdAt: integer("created_at").notNull(),
   completedAt: integer("completed_at"),
 });

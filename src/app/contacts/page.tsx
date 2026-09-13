@@ -416,7 +416,7 @@ const ContactCard = memo(function ContactCard({
                       to THIS contact — the chip there carries the label + a
                       one-tap clear back to the full list. */}
                   <Link
-                    href={`/payments?contact=${encodeURIComponent(contact.address)}`}
+                    href={`/actions?contact=${encodeURIComponent(contact.address)}`}
                     className="mt-1 flex items-center justify-center gap-1 border-t border-border/50 pt-1.5 text-[10px] font-medium text-primary/80 transition-colors hover:bg-primary/5 hover:text-primary cursor-pointer"
                   >
                     {t("contacts.seeAllPayments")}

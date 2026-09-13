@@ -74,6 +74,12 @@ const SAMPLE_ARGS: Record<string, Record<string, unknown>> = {
   estimate_verification_cost: { txHash: TXHASH },
   get_attestation_bounds: { txHash: TXHASH },
   submit_proof_onchain: { txHash: TXHASH },
+  // AC4: review_contract's realistic call — a full small draft contract (the
+  // exact args shape the agentic review loop sends before deploy_contract).
+  review_contract: {
+    source:
+      "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.23;\n\ncontract Counter {\n    uint256 public count;\n    function increment() external { count += 1; }\n}",
+  },
 };
 
 describe("tool coverage suite (P26)", () => {

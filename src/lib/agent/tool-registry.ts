@@ -145,6 +145,17 @@ export const deployContractSchema = z.object({
   sourceName: z.string().max(60).nullish().describe("Short name for the custom contract, e.g. 'TokenVesting'"),
 });
 
+// AC4: the review half of the custom-deploy path — the agent lints + compiles
+// its draft and iterates until ready:true BEFORE deploy_contract is called.
+export const reviewContractSchema = z.object({
+  source: z
+    .string()
+    .min(1)
+    .max(120_000)
+    .describe("Full Solidity source of the draft contract — the exact text you intend to deploy"),
+  sourceName: z.string().max(60).nullish().describe("Short contract name (optional), e.g. 'TokenVesting'"),
+});
+
 // ── Attestcoin flow tools (multi-step, client-executed, funds class) ─────────
 
 export const createConditionalReleaseSchema = z.object({
@@ -821,6 +832,28 @@ export const TOOL_REGISTRY: Record<string, ToolDef> = {
     executor: "server",
     risk: "deploy", // confirmation-gated: real gas + public on-chain write via the app signer
     traceTitle: () => "Submit proof on-chain (verifyAndEmit)",
+  },
+
+  // ── AC4: agentic contract review — the iterate-until-ready half of ────────
+  // deploy_contract's custom path. Read-only: compiles + lints the draft,
+  // never deploys. Sits with the other read-only server tools above.
+  review_contract: {
+    name: "review_contract",
+    description:
+      "Review a draft Solidity contract BEFORE deployment: compiles it with solc and runs static-analysis lint rules (security + style). Returns structured findings (severity, rule, line, message, hint) and a ready verdict. Iterate: fix every error AND warning, then call again — only call deploy_contract when this returns ready:true. Always use this tool first for custom contracts.",
+    parameters: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "Full Solidity source of the draft contract" },
+        sourceName: { type: ["string", "null"], description: "Short contract name (optional), e.g. 'TokenVesting'" },
+      },
+      required: ["source"],
+      additionalProperties: false,
+    },
+    zod: reviewContractSchema,
+    executor: "server",
+    risk: "read",
+    traceTitle: (a) => `Review contract draft ${String(a.sourceName ?? "")}`.trim(),
   },
 };
 
