@@ -68,6 +68,44 @@ export interface ServerToolContext {
   wallet: WalletContext | null;
   /** Emits a live step-status update (used by wait_for_attestation). */
   onProgress?: (text: string, status?: "waiting_attestation" | "running") => void;
+  /** Run abort signal (browser disconnect / stop) — long waits race it so the
+   *  server-side wait dies with the run instead of zombie-ing to its timeout. */
+  signal?: AbortSignal;
+}
+
+/** True when the error is an abort (AbortError DOMException or its message form). */
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === "AbortError") ||
+    (err instanceof Error && err.name === "AbortError")
+  );
+}
+
+/** Race a long promise against the run's abort signal (listener cleaned up). */
+async function raceAbort<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return p;
+  if (signal.aborted) throw new DOMException("aborted", "AbortError");
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    p.then(
+      (v) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(v);
+      },
+      (e) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** Abortable sleep (bounded by ms). */
+function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  if (!signal) return new Promise((r) => setTimeout(r, ms));
+  return raceAbort(new Promise<void>((r) => setTimeout(r, ms)), signal);
 }
 
 export async function execGetBalances(
@@ -247,9 +285,14 @@ export async function execCheckAttestation(
       },
     };
   }
-  if (proof.state === "pending") {
+  if (proof.state === "pending" || proof.state === "unknown_tx") {
     // G6 — the real attestation bracket, not an inference from builder 404s:
     // which bound the tx sits between + isAttested + the live attested head.
+    // "unknown_tx" rides the same branch: the builder 404s for any tx whose
+    // block is not yet attested (see the N2 note in proof.ts), so it IS the
+    // pending state — without this, check_attestation_status answered
+    // "failed" for every not-yet-attested tx and the documented
+    // check→wait flow (system prompt §Attestcoin) never triggered.
     const client = publicClient(evmChainId);
     let bounds: Awaited<ReturnType<typeof getAttestationBounds>> = null;
     if (client) {
@@ -274,10 +317,11 @@ export async function execCheckAttestation(
       ? ` Tx block ${bounds.parentHeight}–${bounds.childHeight} bracket: parent is ${bounds.parentIsAttestation ? "an attestation" : "a checkpoint"} at ${bounds.parentHeight}, next bound at ${bounds.childHeight}; attested=${bounds.isAttested}.`
       : "";
     const etaNote = bounds && !bounds.isAttested ? " Attestations land every ~2 min on Ethereum-class chains." : "";
+    const stateLabel = proof.state === "unknown_tx" ? "pending (builder 404 — not attested yet)" : "pending";
     return {
       ok: true,
-      summary: `Not attested yet (proof builder: pending). Latest attested height for ${src.name}: ${height ?? "unknown"}.${boundsNote}${etaNote} Wait a few minutes and re-check.`,
-      data: { state: "pending", attestedHeight: height, ...(bounds ? { bounds } : {}) },
+      summary: `Not attested yet (proof builder: ${stateLabel}). Latest attested height for ${src.name}: ${height ?? "unknown"}.${boundsNote}${etaNote} Wait a few minutes and re-check, or call wait_for_attestation to wait for it.`,
+      data: { state: proof.state, attestedHeight: height, ...(bounds ? { bounds } : {}) },
     };
   }
   return { ok: false, summary: `Attestation check failed: ${proof.detail ?? "unknown error"}`, error: proof.state };
@@ -298,6 +342,7 @@ export async function execWaitForAttestation(
   const maxWaitMs = Math.min(args.maxWaitSeconds, 900) * 1000;
   const deadline = startedAt + maxWaitMs;
   const waitedSeconds = () => Math.round((Date.now() - startedAt) / 1000);
+  const remainingMs = () => Math.max(deadline - Date.now(), 0);
 
   // ── G5: waitUntilHeightAttested instead of getProof polling ──────────────
   // The old loop polled getProof every 15s — each miss was an HTTP 404 against
@@ -308,10 +353,15 @@ export async function execWaitForAttestation(
   const fetchProofOnce = () => getTxProof(src.chainKey, args.txHash);
 
   // 1. Immediate attempt — a cached proof resolves with zero waiting.
+  //    ⚠ A miss here ("pending" / "unknown_tx" / "error") is NOT a verdict
+  //    that the tx is missing: the proof builder answers 404 for ANY tx whose
+  //    block is not yet attested — the exact situation this tool exists to
+  //    wait through (the same 404 also surfaces while a tx is still pending).
+  //    Falling through is therefore mandatory: the RPC lookup below is the
+  //    only honest "is this tx actually mined?" check, and the SDK wait is
+  //    the actual waiting. Bailing out here made the tool fail instantly for
+  //    every not-yet-attested tx — the one case it was called for.
   let proof = await fetchProofOnce();
-  if (proof.state === "unknown_tx") {
-    return { ok: false, summary: `Transaction ${args.txHash.slice(0, 12)}… not found on ${src.name}.`, error: "unknown_tx" };
-  }
 
   if (proof.state !== "proof" && Date.now() < deadline) {
     // 2. Find the tx's block height on the source chain (needed to wait for
@@ -329,27 +379,55 @@ export async function execWaitForAttestation(
     if (targetHeight == null) {
       return {
         ok: false,
-        summary: `Transaction ${args.txHash.slice(0, 12)}… is not mined on ${src.name} yet — nothing to attest until it lands in a block.`,
+        summary: `Transaction ${args.txHash.slice(0, 12)}… is not mined on ${src.name} yet — nothing to attest until it lands in a block. If you expected it to be mined, check the tx hash / chain with get_transaction_status.`,
         error: "not_mined",
       };
     }
 
-    const remainingMs = Math.max(deadline - Date.now(), 0);
     const { proofBuilderUrl } = attestcoinEndpoints();
     const builder = new proofProvider.service.ProofBuilder(src.chainKey, proofBuilderUrl);
     ctx.onProgress?.(
-      `Waiting for Attestcoin attestation… (block ${targetHeight} on ${src.name}, up to ${Math.round(remainingMs / 1000)}s)`,
+      `Waiting for Attestcoin attestation… (block ${targetHeight} on ${src.name}, up to ${Math.round(remainingMs() / 1000)}s)`,
       "waiting_attestation",
     );
+    // Heartbeat — a 600s wait must not look frozen in the trace.
+    const heartbeat = ctx.onProgress
+      ? setInterval(() => {
+          ctx.onProgress?.(
+            `Still waiting for Attestcoin attestation… (${waitedSeconds()}s elapsed of the ${Math.round(maxWaitMs / 1000)}s budget; attestations land every ~2 min)`,
+            "waiting_attestation",
+          );
+        }, 30_000)
+      : null;
     try {
       // Poll interval 15s (SDK default), timeout = the tool's own remaining
-      // budget, extraDelay covers load-balanced builder replicas (5s).
-      await builder.waitUntilHeightAttested(src.chainKey, targetHeight, 15_000, remainingMs, 5_000);
-    } catch {
+      // budget, extraDelay covers load-balanced builder replicas (5s). The
+      // run's abort signal races it so a closed tab / Stop ends the wait.
+      await raceAbort(
+        builder.waitUntilHeightAttested(src.chainKey, targetHeight, 15_000, remainingMs(), 5_000),
+        ctx.signal,
+      );
+    } catch (err) {
+      if (isAbortError(err)) throw err;
       // Timeout inside the SDK — fall through to the final getProof check.
+    } finally {
+      if (heartbeat) clearInterval(heartbeat);
     }
-    // 3. The height is attested + in the builder cache — one final fetch.
+    // 3. The height is attested + in the builder cache — final fetch, with a
+    //    short bounded retry: proof GENERATION can lag behind the
+    //    attested-height cache (extraDelay covers replica skew, not proof
+    //    build time), so a single fetch right after the wait can still 404.
     proof = await fetchProofOnce();
+    for (let attempt = 1; proof.state !== "proof" && Date.now() < deadline && attempt <= 6; attempt++) {
+      const sleepMs = Math.min(10_000, remainingMs());
+      if (sleepMs <= 0) break;
+      ctx.onProgress?.(
+        `Attested height reached — proof builder is generating the proof (retry ${attempt}/6, ${waitedSeconds()}s elapsed)…`,
+        "waiting_attestation",
+      );
+      await abortableSleep(sleepMs, ctx.signal);
+      proof = await fetchProofOnce();
+    }
   }
 
   if (proof.state === "proof" && proof.proof) {
@@ -600,21 +678,15 @@ async function proofOrPendingOutcome(
   if (result.state === "proof" && result.proof && result.raw) {
     return { proof: { ...result.raw, proof: result.proof } };
   }
-  if (result.state === "pending") {
+  if (result.state === "pending" || result.state === "unknown_tx") {
+    // unknown_tx is the builder's not-attested-yet 404 (proof.ts N2 note) —
+    // same honest retry-later guidance as pending, with a pointer to
+    // get_transaction_status in case the tx genuinely never landed.
     return {
       outcome: {
         ok: true,
-        summary: `No proof yet — the block containing the tx is not attested on Creditcoin. ${toolLabel} needs a proof first: wait a few minutes (attestations land every ~2 min on Ethereum-class chains), then retry.`,
+        summary: `No proof yet — the block containing the tx is not attested on Creditcoin (or the tx is not on that chain yet). ${toolLabel} needs a proof first: wait a few minutes (attestations land every ~2 min on Ethereum-class chains), then retry — or call wait_for_attestation to wait in one step. If the tx should already be mined, verify it with get_transaction_status.`,
         data: { state: "pending" },
-      },
-    };
-  }
-  if (result.state === "unknown_tx") {
-    return {
-      outcome: {
-        ok: false,
-        summary: `Transaction ${txHash.slice(0, 14)}… was not found by the proof builder on the source chain.`,
-        error: "unknown_tx",
       },
     };
   }

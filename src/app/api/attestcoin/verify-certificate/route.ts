@@ -246,11 +246,14 @@ export async function POST(request: Request) {
         stale: cost.stale,
       },
     });
-  } else if (outcome.state === "pending") {
+  } else if (outcome.state === "pending" || outcome.state === "unknown_tx") {
+    // unknown_tx = the builder's not-attested-yet 404 (proof.ts N2 note) —
+    // a certificate for a not-yet-attested tx skips the builder cross-check
+    // (same as pending) instead of failing it with the raw 404 detail.
     checks.push({
       id: "builder",
       status: "skip",
-      detail: "the builder does not currently serve a proof for this tx",
+      detail: "the builder does not currently serve a proof for this tx (not attested yet)",
       data: { state: outcome.state, detail: outcome.detail ?? null },
     });
   } else {

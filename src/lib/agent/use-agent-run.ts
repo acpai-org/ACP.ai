@@ -389,12 +389,27 @@ export function useAgentRun() {
         };
         void store; // (store captured once for clarity; reads use fresh getState)
 
+        // D10 guard (contract: history must NOT already contain the outgoing
+        // user message). If a caller snapshots the transcript AFTER adding the
+        // user message — exactly what chat-view's store snapshot did — the
+        // plain spread below sent the message TWICE and the model read
+        // doubled amounts ("0.0010.001") as typos. Chat-view now excludes the
+        // outgoing id; this guard makes the contract self-enforcing for every
+        // other caller too: drop the trailing duplicate instead of re-appending.
+        const historyEndsWithUserText =
+          opts.history.length > 0 &&
+          opts.history[opts.history.length - 1].role === "user" &&
+          opts.history[opts.history.length - 1].content === opts.userText;
+        const outgoingMessages = historyEndsWithUserText
+          ? opts.history
+          : [...opts.history, { role: "user" as const, content: opts.userText }];
+
         const res = await fetch("/api/agent/run", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             sessionId,
-            messages: [...opts.history, { role: "user", content: opts.userText }],
+            messages: outgoingMessages,
             providerConfig: opts.providerConfig,
             wallet: opts.wallet,
           }),

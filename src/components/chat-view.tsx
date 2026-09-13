@@ -307,6 +307,12 @@ export function ChatView() {
        *  results so the loop re-runs ONLY the failed step (completed steps'
        *  results are preserved in the model context). */
       historyOverride?: AgentRunCallOptions["history"],
+      /** D10 duplication fix: the id of the user message THIS turn sends —
+       *  it is already in the transcript store when the history snapshot is
+       *  taken, and use-agent-run appends userText again. Excluding it here
+       *  keeps the outgoing request single-copy; without it the model saw
+       *  the whole message twice (amounts got read as "0.0010.001"). */
+      outgoingUserMsgId?: string | null,
     ): Promise<{ error: string | null; errorCode: string | null; aborted: boolean }> => {
       const sid = useChatStore.getState().activeId;
       const currentSession = sid ? useChatStore.getState().sessions[sid] : null;
@@ -321,7 +327,7 @@ export function ChatView() {
           : currentMessages;
       const history: AgentRunCallOptions["history"] = historyOverride ??
         cappedMessages
-          .filter((m) => m.id !== assistantId)
+          .filter((m) => m.id !== assistantId && m.id !== outgoingUserMsgId)
           .filter((m) => m.role === "user" || m.content.trim().length > 0)
           .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
@@ -399,12 +405,16 @@ export function ChatView() {
 
   /** The assistant-turn core shared by send / edit-resend / regenerate (C22):
    * parks an empty streaming assistant message, runs the loop, and lands the
-   * result. The user message must ALREADY be in the transcript. */
+   * result. The user message must ALREADY be in the transcript — pass its id
+   * as outgoingUserMsgId so it is NOT also swept into the LLM history (D10:
+   * use-agent-run appends userText itself; a double-send made the model read
+   * duplicated amounts like "0.0010.001"). */
   const runAssistantTurn = useCallback(
     async (
       sid: string,
       promptText: string,
       historyOverride?: AgentRunCallOptions["history"],
+      outgoingUserMsgId?: string | null,
     ): Promise<void> => {
       setIsThinking(true);
 
@@ -431,7 +441,7 @@ export function ChatView() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const result = await callAiStream(promptText, assistantId, sid, controller.signal, historyOverride);
+      const result = await callAiStream(promptText, assistantId, sid, controller.signal, historyOverride, outgoingUserMsgId);
       abortRef.current = null;
       setIsThinking(false);
 
@@ -490,15 +500,22 @@ export function ChatView() {
         // transcript and both rode the next request's context.
         useChatStore.getState().truncateAfter(sid, editMsgId);
       } else {
+        // D10: pin the outgoing user message's id so callAiStream can exclude
+        // it from the history snapshot — the store already holds it by the
+        // time the snapshot is taken, and use-agent-run re-appends userText.
+        const outgoingUserMsgId = newChatMsgId();
         useChatStore.getState().addMessage(
           sid,
           newMessage("user", text, {
+            id: outgoingUserMsgId,
             ...(attachments ? { contextAttachments: attachments } : {}),
           }),
         );
+        await runAssistantTurn(sid, promptText, undefined, outgoingUserMsgId);
+        return;
       }
 
-      await runAssistantTurn(sid, promptText);
+      await runAssistantTurn(sid, promptText, undefined, editMsgId);
     },
     [ensureSession, setEditingPrefill, editingMessageId, setEditingMessageId, runAssistantTurn, buildAttachmentCtx],
   );
@@ -634,7 +651,9 @@ export function ChatView() {
           /* keep the bare text — honest failure lands in the run itself */
         }
       }
-      await runAssistantTurn(sid, promptText);
+      // D10: origin.id is the user message this turn re-sends — exclude it
+      // from the history snapshot (use-agent-run appends userText itself).
+      await runAssistantTurn(sid, promptText, undefined, origin.id);
     },
     [isThinking, buildAttachmentCtx, runAssistantTurn],
   );

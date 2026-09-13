@@ -821,7 +821,9 @@ async function runServerTool(
   onProgress: (text: string, status?: TraceStepStatus) => void,
 ): Promise<ToolOutcome> {
   const st = await import("@/lib/agent/server-tools");
-  const wctx = { wallet: ctx.wallet, onProgress };
+  // signal rides the context so long server-side waits (wait_for_attestation)
+  // die with the run (browser disconnect / Stop) instead of zombie-ing.
+  const wctx = { wallet: ctx.wallet, onProgress, signal: ctx.signal };
   switch (name) {
     case "get_balances":
       return st.execGetBalances(args as never, wctx);

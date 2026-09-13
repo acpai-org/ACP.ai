@@ -223,8 +223,10 @@ export async function prepareClientTool(
         return {
           ok: false,
           error:
-            outcome.state === "pending"
-              ? `Not attested yet — call wait_for_attestation first (proof builder says: ${outcome.detail ?? "pending"}).`
+            outcome.state === "pending" || outcome.state === "unknown_tx"
+              ? // unknown_tx is the builder's not-attested-yet 404 (proof.ts N2
+                // note) — same wait guidance as pending, NOT a hard failure.
+                `Not attested yet — call wait_for_attestation first (proof builder says: ${outcome.detail ?? outcome.state}).`
               : `Proof lookup failed: ${outcome.detail ?? outcome.state}`,
         };
       }

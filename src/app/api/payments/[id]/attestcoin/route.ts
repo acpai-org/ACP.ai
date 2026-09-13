@@ -98,7 +98,9 @@ export async function GET(request: Request, { params }: RouteParams) {
     if (raw?.txBytes) {
       decoded = await decodeTxBytes(raw.txBytes, txHash);
     }
-  } else if (outcome.state === "pending") {
+  } else if (outcome.state === "pending" || outcome.state === "unknown_tx") {
+    // unknown_tx = the builder's not-attested-yet 404 (proof.ts N2 note) —
+    // gets the same bounds enrichment as pending (see api/attestcoin/proof).
     // Bounds need the tx's block height — one cheap source-chain lookup.
     try {
       const viemChain = VIEM_CHAINS[chain.evmChainId];

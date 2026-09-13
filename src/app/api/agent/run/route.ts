@@ -16,7 +16,11 @@ import type { WalletContext } from "@/lib/ai/system-prompt";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
-export const maxDuration = 300;
+// wait_for_attestation may hold the stream open for up to 900s (its own clamp,
+// aligned with the tool's zod max). 300 killed legitimate 600s waits on
+// platforms that enforce maxDuration (self-hosted Next ignores it, but fluid
+// compute / serverless deployments honor the value).
+export const maxDuration = 900;
 
 interface IncomingMessage {
   role: "user" | "assistant";
