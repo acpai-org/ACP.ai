@@ -71,6 +71,12 @@ export interface ServerToolContext {
   /** Run abort signal (browser disconnect / stop) — long waits race it so the
    *  server-side wait dies with the run instead of zombie-ing to its timeout. */
   signal?: AbortSignal;
+  /** V3: absolute epoch-ms deadline bounding this wait by the PLATFORM's
+   *  request ceiling (Vercel kills the request at maxDuration; the route arms
+   *  this at request start). Undefined = no platform ceiling. When the
+   *  ceiling ends a wait early the tool returns error "run_budget" with an
+   *  honest continuation message instead of being killed mid-stream. */
+  waitDeadlineMs?: number;
 }
 
 /** True when the error is an abort (AbortError DOMException or its message form). */
@@ -339,10 +345,22 @@ export async function execWaitForAttestation(
     return { ok: false, summary: `Chain ${evmChainId} is not an Attestcoin source chain this phase.`, error: "unsupported_source" };
   }
   const startedAt = Date.now();
+  // V3: the effective deadline is the user's own budget, the tool's hard 900s
+  // clamp, AND the platform's request ceiling (ctx.waitDeadlineMs) — whichever
+  // comes first. On capped hosts (Vercel maxDuration=300) a 600s request ends
+  // early with an honest continue-waiting result the model relays; the user's
+  // next "keep waiting" reply re-arms the budget in a fresh request, so TOTAL
+  // wait time is unlimited even though every single request stays capped.
+  const platformDeadline = ctx.waitDeadlineMs ?? Number.POSITIVE_INFINITY;
   const maxWaitMs = Math.min(args.maxWaitSeconds, 900) * 1000;
-  const deadline = startedAt + maxWaitMs;
+  const deadline = Math.min(startedAt + maxWaitMs, platformDeadline);
+  const cappedByPlatform = platformDeadline < startedAt + maxWaitMs;
   const waitedSeconds = () => Math.round((Date.now() - startedAt) / 1000);
   const remainingMs = () => Math.max(deadline - Date.now(), 0);
+  // The EFFECTIVE wait budget (user's ask, the 900s clamp, and the platform
+  // ceiling combined) — narrated honestly instead of the raw maxWaitSeconds
+  // (which would overstate the budget on capped hosts).
+  const budgetSeconds = Math.round((deadline - startedAt) / 1000);
 
   // ── G5: waitUntilHeightAttested instead of getProof polling ──────────────
   // The old loop polled getProof every 15s — each miss was an HTTP 404 against
@@ -364,6 +382,21 @@ export async function execWaitForAttestation(
   let proof = await fetchProofOnce();
 
   if (proof.state !== "proof" && Date.now() < deadline) {
+    // V3: too little PLATFORM budget left to start a meaningful wait (the
+    // model re-called wait_for_attestation in the SAME run after a run_budget
+    // return, or the request is simply near its ceiling). Guarded by
+    // cappedByPlatform so a small USER budget (maxWaitSeconds 10–19, zod min
+    // is 10) still runs its honest short wait → "timeout" like before — only
+    // the platform ceiling earns the run_budget continuation result, and the
+    // model can close its turn BEFORE the host kills the request mid-stream.
+    if (cappedByPlatform && deadline - Date.now() < 20_000) {
+      return {
+        ok: false,
+        summary:
+          "This request is already at its platform time ceiling — I cannot start another long wait in the same turn. End your turn now and tell the user plainly: the transaction is mined and pending Attestcoin attestation (typically 8–10 minutes on Sepolia). When they reply (e.g. \"keep waiting\") I'll continue the wait in the fresh request, or they can check later with check_attestation_status — transactions you executed are tracked automatically meanwhile (the Actions log updates when the proof lands); a tx the user merely mentioned is not auto-tracked, so re-check it with check_attestation_status when they ask. Do NOT call wait_for_attestation again this turn.",
+        error: "run_budget",
+      };
+    }
     // 2. Find the tx's block height on the source chain (needed to wait for
     //    the right height). Not mined yet → honest "not mined" answer.
     const client = publicClient(evmChainId);
@@ -394,7 +427,7 @@ export async function execWaitForAttestation(
     const heartbeat = ctx.onProgress
       ? setInterval(() => {
           ctx.onProgress?.(
-            `Still waiting for Attestcoin attestation… (${waitedSeconds()}s elapsed of the ${Math.round(maxWaitMs / 1000)}s budget; attestations land every ~2 min)`,
+            `Still waiting for Attestcoin attestation… (${waitedSeconds()}s elapsed of the ${budgetSeconds}s budget; attestations land every ~2 min)`,
             "waiting_attestation",
           );
         }, 30_000)
@@ -442,6 +475,18 @@ export async function execWaitForAttestation(
         continuityRoots: proof.proof.continuityRoots,
         waitedSeconds: waitedSeconds(),
       },
+    };
+  }
+  // V3: distinguish "the PLATFORM ceiling ended the wait" (not a failure —
+  // continue in the next turn) from "the user's own maxWaitSeconds expired"
+  // (the tool's real timeout).
+  if (cappedByPlatform && Date.now() >= platformDeadline) {
+    return {
+      ok: false,
+      summary:
+        `Still not attested after ${waitedSeconds()}s — this request hit its platform time ceiling, so the wait stopped here. This is NOT a failure: the transaction is mined, its attestation simply hasn't landed yet (typical lag 8–10 minutes on Sepolia). ` +
+        "Tell the user they can reply \"keep waiting\" and I'll continue the wait in the next turn, or check back later with check_attestation_status — transactions you executed are tracked automatically meanwhile (the Actions log updates when the proof lands); a tx the user merely mentioned is not auto-tracked, so re-check it when they ask. Do NOT call wait_for_attestation again this turn — end your turn and relay the offer.",
+      error: "run_budget",
     };
   }
   return {

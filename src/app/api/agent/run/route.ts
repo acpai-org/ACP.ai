@@ -16,11 +16,28 @@ import type { WalletContext } from "@/lib/ai/system-prompt";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
-// wait_for_attestation may hold the stream open for up to 900s (its own clamp,
-// aligned with the tool's zod max). 300 killed legitimate 600s waits on
-// platforms that enforce maxDuration (self-hosted Next ignores it, but fluid
-// compute / serverless deployments honor the value).
+// V3: 300 is the ceiling every Vercel tier accepts — Hobby/Standard CAP the
+// value itself, so exporting 900 fails the deployment at config collection
+// (exactly what happened). Self-hosted Next ignores maxDuration entirely, so
+// a 300 literal is the safe universal value. The 600–900s wait OUTCOME no
+// longer rides on this number: wait_for_attestation clamps itself to a
+// per-run deadline (WAIT_BUDGET_SECONDS below) and, when the platform
+// ceiling ends a wait early, returns an honest continue-waiting result the
+// model relays to the user — the next user reply ("keep waiting") re-arms
+// the budget in a fresh request, and the background attestation poller keeps
+// tracking the tx meanwhile. Unlimited TOTAL waiting, capped requests.
 export const maxDuration = 300;
+
+// V3: absolute per-run ceiling for how long wait_for_attestation may hold
+// THIS request open, sized to maxDuration minus headroom for narration turns
+// and tool round-trips (~40s). Override with ACP_RUN_WAIT_SECONDS on hosts
+// without a request ceiling (self-hosted / docker can go toward the tool's
+// own 900s clamp).
+const WAIT_BUDGET_SECONDS = (() => {
+  const env = Number(process.env.ACP_RUN_WAIT_SECONDS ?? "");
+  if (Number.isFinite(env) && env >= 30) return Math.min(env, 870);
+  return process.env.VERCEL ? 260 : 870;
+})();
 
 interface IncomingMessage {
   role: "user" | "assistant";
@@ -131,6 +148,8 @@ export async function POST(req: Request) {
           providerConfig,
           emit: send,
           signal: req.signal,
+          // V3: platform request-ceiling budget for long waits (see above).
+          waitDeadlineMs: Date.now() + WAIT_BUDGET_SECONDS * 1000,
         });
       } catch (err) {
         console.error("[agent] run crashed:", err);

@@ -60,6 +60,12 @@ export interface AgentRunOptions {
   };
   emit: (evt: AgentStreamEvent) => void;
   signal: AbortSignal;
+  /** V3: absolute epoch-ms deadline after which wait_for_attestation must
+   *  release the request — the platform's request-ceiling budget, armed by
+   *  the route (Vercel caps a request at maxDuration; the wait hands control
+   *  back honestly instead of being killed mid-stream). Optional: absent in
+   *  tests and on hosts without a request ceiling. */
+  waitDeadlineMs?: number;
 }
 
 /** P10: history entries can carry prior tool calls/results (see AgentRunOptions). */
@@ -168,7 +174,7 @@ interface ToolOutcome {
 }
 
 export async function runAgentLoop(opts: AgentRunOptions): Promise<void> {
-  const { sessionId, wallet, providerConfig, emit, signal } = opts;
+  const { sessionId, wallet, providerConfig, emit, signal, waitDeadlineMs } = opts;
   const runId = newRunId();
   bindRun(sessionId, runId);
   emit({ type: "run_started", runId, sessionId });
@@ -279,6 +285,7 @@ export async function runAgentLoop(opts: AgentRunOptions): Promise<void> {
           wallet,
           emit,
           signal,
+          waitDeadlineMs,
           steps,
           skillAllowlist: allowlist,
         });
@@ -374,6 +381,8 @@ interface ExecContext {
   wallet: WalletContext | null;
   emit: (evt: AgentStreamEvent) => void;
   signal: AbortSignal;
+  /** V3: platform request-ceiling deadline for long waits (see route). */
+  waitDeadlineMs?: number;
   steps: TraceStep[];
   /**
    * Active skills' tool allowlist (null = all tools). F2 (D.6 audit): the
@@ -823,7 +832,8 @@ async function runServerTool(
   const st = await import("@/lib/agent/server-tools");
   // signal rides the context so long server-side waits (wait_for_attestation)
   // die with the run (browser disconnect / Stop) instead of zombie-ing.
-  const wctx = { wallet: ctx.wallet, onProgress, signal: ctx.signal };
+  // V3: waitDeadlineMs rides it too — the platform request-ceiling budget.
+  const wctx = { wallet: ctx.wallet, onProgress, signal: ctx.signal, waitDeadlineMs: ctx.waitDeadlineMs };
   switch (name) {
     case "get_balances":
       return st.execGetBalances(args as never, wctx);

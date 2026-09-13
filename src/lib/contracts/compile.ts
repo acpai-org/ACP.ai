@@ -89,8 +89,18 @@ interface SolcOutput {
 function readContractFile(relPath: string): string | null {
   const normalized = relPath.replace(/\\/g, "/");
   if (normalized.includes("..")) return null;
-  const base = normalized.startsWith("contracts/") ? normalized : `contracts/${normalized}`;
-  const abs = path.join(process.cwd(), base);
+  // V3 (Turbopack): the join below keeps "contracts" as a LITERAL first
+  // segment. Joining process.cwd() with one fully dynamic string made
+  // Turbopack's static tracer fall back to tracing the WHOLE project — the
+  // build warning that shipped public/ and every source file into the
+  // serverless bundle (bloat / size-limit failures). A literal root segment
+  // scopes the trace to contracts/ only (Turbopack's own recommended form:
+  // path.join(process.cwd(), 'data', bar)). Same contract as the worker-side
+  // twin below: strip a redundant "contracts/" prefix, keep the traversal
+  // guard, keep the existsSync/readFileSync pair.
+  const rel = normalized.startsWith("contracts/") ? normalized.slice("contracts/".length) : normalized;
+  if (rel.length === 0) return null;
+  const abs = path.join(process.cwd(), "contracts", rel);
   if (!abs.startsWith(CONTRACTS_ROOT)) return null;
   if (!existsSync(abs)) return null;
   try {

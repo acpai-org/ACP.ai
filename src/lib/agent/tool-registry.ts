@@ -356,7 +356,7 @@ export const TOOL_REGISTRY: Record<string, ToolDef> = {
   wait_for_attestation: {
     name: "wait_for_attestation",
     description:
-      "Wait (bounded) until Attestcoin has attested the block containing a source-chain transaction, so a proof can be generated. Typical lag is minutes. Emits live progress. Call this before execute_conditional_release / swap release when check_attestation_status says 'pending'.",
+      "Wait (bounded) until Attestcoin has attested the block containing a source-chain transaction, so a proof can be generated. Typical lag is minutes. Emits live progress. Call this before execute_conditional_release / swap release when check_attestation_status says 'pending'. If the result has error 'run_budget', the request hit its platform time ceiling — end your turn and relay the continuation offer to the user exactly as the summary instructs; do NOT immediately re-call this tool in the same turn.",
     parameters: {
       type: "object",
       properties: {

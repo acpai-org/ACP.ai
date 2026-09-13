@@ -19,7 +19,17 @@ export type AppDatabase = NodeSqliteDatabase<{
 // chdir would break the contracts/ compile service's relative paths).
 // Serverless hosts (Vercel, Netlify) only give each function a writable
 // /tmp — point the file there (data lifetime follows the platform's rules).
-const DB_PATH = process.env.ACP_DB_PATH ?? (process.env.VERCEL || process.env.NETLIFY ? "/tmp/sqlite.db" : path.join(process.cwd(), "sqlite.db"));
+// V3 build-phase guard: `next build` imports route modules in up to 11
+// parallel workers purely to collect their segment config — the old
+// module-scope open had ALL of them contend on the REAL database file at
+// once (the WAL switch needs a brief exclusive moment → "database is locked"
+// → "Failed to collect page data for /api/agent/actions"). Nothing
+// legitimately queries during the production-build phase, so each build
+// worker gets a private throwaway in-memory database instead.
+const DB_PATH =
+  process.env.NEXT_PHASE === "phase-production-build"
+    ? ":memory:"
+    : process.env.ACP_DB_PATH ?? (process.env.VERCEL || process.env.NETLIFY ? "/tmp/sqlite.db" : path.join(process.cwd(), "sqlite.db"));
 
 const globalForDb = globalThis as unknown as {
   __sqlite?: DatabaseSync;
@@ -30,12 +40,14 @@ const sqlite =
   globalForDb.__sqlite ??
   (() => {
     const instance = new DatabaseSync(DB_PATH);
-    instance.exec("PRAGMA journal_mode = WAL");
-    // D12 fix: WAL without a busy timeout throws SQLITE_BUSY IMMEDIATELY when
-    // a second writer holds the lock (test scripts, qa seeds, dev restart
-    // races) — node:sqlite's default busy_timeout is 0. 5s is the standard
-    // pairing with WAL: writers queue instead of erroring.
+    // D12 v2 (V3 order fix): busy_timeout must be armed BEFORE journal_mode —
+    // switching to WAL itself needs the database lock, and with node:sqlite's
+    // default busy_timeout=0 a second opener (dev restart, seed script, a
+    // parallel build worker) received SQLITE_BUSY immediately. The old order
+    // armed the timeout only AFTER the one pragma that needed it — that was
+    // the "database is locked" at src/db/index.ts:33 that killed builds.
     instance.exec("PRAGMA busy_timeout = 5000");
+    instance.exec("PRAGMA journal_mode = WAL");
     instance.exec("PRAGMA foreign_keys = ON");
     // D11 (Node 24 teardown race): Statements prepared by ensureDb() become
     // garbage immediately; if GC hasn't reclaimed them by process exit, their
