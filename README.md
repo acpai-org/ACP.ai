@@ -32,9 +32,11 @@
 - [Scope & roadmap](#scope--roadmap)
 
 > [!NOTE]
-> The demo video will be ready in a few days. For now, the project is deployed on web in beta form.
+> UPDATE!
+> Demo video: https://youtu.be/XrBkL0Ix0xQ<br>
 > Link URL (beta): https://acp-ai.vercel.app<br>
-> The Track tracks for this project are the DeFi/AI Track.<br>
+> The Track tracks for this project are DeFi/AI Track, though it was submitted in the AI Track.<br>
+> Currently at 45k-50k Lines of actual code.
 > Low commits are because local commits have been excluded.
 
 # ACP.ai - Attested Credit Protocol
